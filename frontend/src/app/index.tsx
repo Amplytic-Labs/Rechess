@@ -1,5 +1,6 @@
 import { Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+
+import { StyledSafeAreaView } from "@/components/common/styled";
 
 /**
  * Placeholder home screen — proves the base app + theming + Expo Router run.
@@ -8,7 +9,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
  */
 export default function HomeScreen() {
   return (
-    <SafeAreaView className="flex-1">
+    <StyledSafeAreaView className="flex-1">
       <View className="flex-1 items-center justify-center gap-3 px-6">
         <Text className="text-4xl font-bold text-foreground">Rechess</Text>
         <Text className="text-center text-base text-muted-foreground">
@@ -18,6 +19,6 @@ export default function HomeScreen() {
           Frontend rules: see RULES.md · Your module: src/screens/lobby/README.md
         </Text>
       </View>
-    </SafeAreaView>
+    </StyledSafeAreaView>
   );
 }

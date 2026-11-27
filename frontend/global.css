@@ -1,0 +1,58 @@
+@import 'tailwindcss';
+@import 'uniwind';
+@import 'heroui-native/styles';
+
+/*
+ * Rechess design tokens — the single source of truth for colors.
+ * Names follow `--color-<token>` so they become Tailwind utilities:
+ *   bg-background · bg-surface · text-foreground · text-muted-foreground ·
+ *   bg-primary · text-primary-foreground · border-border · bg-destructive ·
+ *   bg-success · bg-board-light · bg-board-dark · bg-move-target ·
+ *   bg-last-move · bg-check
+ *
+ * Rules (RULES.md §1.3): every theme defines EVERY variable (uniwind warns
+ * in dev otherwise); components use these tokens only — no hardcoded colors,
+ * no arbitrary values like bg-[#fff].
+ *
+ * Dark mode: light/dark are built-in themes and the default is `system`
+ * (follows the device). A manual switch uses Uniwind.setTheme('dark' | 'light'
+ * | 'system'); the useUniwind() hook exposes the active theme.
+ */
+@layer theme {
+  :root {
+    @variant light {
+      --color-background: #fafafa;
+      --color-surface: #ffffff;
+      --color-surface-muted: #f0f0ee;
+      --color-foreground: #1c1c1e;
+      --color-muted-foreground: #787671;
+      --color-primary: #4f46e5;
+      --color-primary-foreground: #ffffff;
+      --color-border: #e1e2e0;
+      --color-destructive: #dc2626;
+      --color-success: #16a34a;
+      --color-board-light: #ebecd0;
+      --color-board-dark: #739552;
+      --color-move-target: #3faf50;
+      --color-last-move: #ffd54f;
+      --color-check: #eb5757;
+    }
+    @variant dark {
+      --color-background: #18181b;
+      --color-surface: #27272a;
+      --color-surface-muted: #343438;
+      --color-foreground: #f4f4f5;
+      --color-muted-foreground: #a1a1aa;
+      --color-primary: #818cf8;
+      --color-primary-foreground: #18181b;
+      --color-border: #3f3f46;
+      --color-destructive: #f87171;
+      --color-success: #4ade80;
+      --color-board-light: #70886a;
+      --color-board-dark: #384838;
+      --color-move-target: #68d391;
+      --color-last-move: #facc15;
+      --color-check: #ef4444;
+    }
+  }
+}

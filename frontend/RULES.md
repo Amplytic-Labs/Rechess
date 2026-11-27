@@ -12,8 +12,8 @@
 | `src/components/chess/` | **F2** | board, squares, pieces, highlights, promotion UI |
 | `src/services/`, `src/store/`, `src/types/`, `src/security/` | **F3** | WebSocket client, zustand stores, protocol types, token storage |
 | `src/screens/game/` | **F4** | game screen composition, panels, history, results |
-| `src/theme/`, `tailwind.config.js` | shared (F1 curates) | only via PR |
-| configs (`app.json`, `babel/metro/tailwind`, `package.json`) | shared (B4/F3 curate) | only via PR |
+| `src/theme/`, `global.css` | shared (F1 curates) | only via PR |
+| configs (`app.json`, `metro.config.js`, `package.json`) | shared (B4/F3 curate) | only via PR |
 
 General rule: **work inside your folder.** Cross-folder changes go through a
 short PR the affected owner approves.
@@ -22,8 +22,8 @@ short PR the affected owner approves.
 
 ### 1.1 No `StyleSheet` objects. Ever.
 
-Style with **NativeWind `className`** only. Tailwind utilities for layout,
-and **theme tokens** (§1.3) for colors.
+Style with **uniwind `className`** (Tailwind CSS v4 utilities) only. Tailwind
+utilities for layout, and **theme tokens** (§1.3) for colors.
 
 ```tsx
 // ❌ FORBIDDEN
@@ -34,11 +34,9 @@ const styles = StyleSheet.create({ card: { backgroundColor: "#fff", borderRadius
 <View className="rounded-lg bg-surface" />
 ```
 
-The `style` prop has exactly **two** legitimate uses:
-1. `style={vars({ "--color-x": "…" })}` for dynamic theme variables,
-2. a dynamic *value* that cannot be expressed as a utility, computed from
-   props/state (e.g. a piece's translate offset) — keep it minimal and
-   comment why.
+The `style` prop has exactly **one** legitimate use: a dynamic *value* that
+cannot be expressed as a utility, computed from props/state (e.g. a piece's
+translate offset) — keep it minimal and comment why.
 
 Anything else → className. Banned by ESLint (`no-restricted-imports` +
 `no-restricted-syntax` + `react-native/no-inline-styles`).
@@ -55,8 +53,8 @@ Enforced by ESLint (`no-restricted-imports` on `expo-status-bar`).
 ### 1.3 Every component you touch must be THEMED
 
 No hardcoded colors anywhere — not in code, not in classNames. Use the
-semantic tokens from `tailwind.config.js` (values defined in
-`src/theme/ThemeProvider.tsx` + `tailwind.config.js`):
+semantic tokens defined in **`global.css`** (repo root, CSS-first — there is
+no `tailwind.config.js` and no ThemeProvider):
 
 | Token | Use |
 |---|---|
@@ -72,30 +70,41 @@ semantic tokens from `tailwind.config.js` (values defined in
 <View className="bg-[#ffffff] dark:bg-[#111111]" />
 <Text style={{ color: "#333" }}>hi</Text>
 
-// ✅ REQUIRED — tokens; dark values come from ThemeProvider automatically
+// ✅ REQUIRED — tokens; dark values switch automatically
 <View className="bg-surface" />
 <Text className="text-muted-foreground">hi</Text>
 ```
 
 No arbitrary color values (`bg-[#…]`, `text-[#…]`), no `react-native` color
-APIs with literals (`no-color-literals` rule). Dark mode must work with zero
-extra work — tokens switch via `src/theme/ThemeProvider.tsx`. Preview dark
-mode with the device simulator's appearance switch.
+APIs with literals (`no-color-literals` rule). Dark mode follows the device
+theme by default (uniwind `system` theme) with zero per-component work.
+Manual switching, if ever needed, goes through `Uniwind.setTheme(...)`
+(see `src/theme/README.md`). Preview dark mode with the simulator's
+appearance switch.
 
 ## 2. Styling & components
 
-- **NativeWind v4.2.7** (Tailwind 3 utilities) is the styling system. RN core
-  components accept `className` directly. **Third-party** components need a
-  one-time `cssInterop` mapping at the app root — see the pattern in
-  `src/app/_layout.tsx` (`GestureHandlerRootView`). Don't scatter cssInterop
-  calls into components; put them in `_layout.tsx` or the component's own
-  module.
+- **uniwind v1.14** (Tailwind CSS **v4** utilities) is the styling system.
+  RN core components accept `className` directly. There is no
+  `tailwind.config.js` — tokens and `@theme` live in `global.css`, and
+  `metro.config.js` wires uniwind (`withUniwindConfig`).
+- **Third-party components** need a one-time `withUniwind(Component)` wrap —
+  do it ONCE at module level in `src/components/common/styled.ts` (see the
+  pattern there), never inside a render function.
+- **HeroUI Native v1.1** (`heroui-native`) is the component library: Button,
+  Card, Input, Dialog, Toast, BottomSheet, etc. Import components
+  **granularly** — `import { Button } from "heroui-native/button"` — the root
+  import breaks the bundle-size optimization (banned by ESLint). HeroUI
+  components accept `className` and are themed through the same tokens in
+  `global.css`. Prefer a HeroUI component over hand-rolling a common control
+  (F1/F4 document the choices in their module READMEs).
 - Animations: **Reanimated 4.7** (no manual babel config — handled by
   `babel-preset-expo`). Never use the `Animated` API from react-native.
 - Gestures: `react-native-gesture-handler` (~3.3); everything is inside
-  `GestureHandlerRootView` already.
-- Safe areas: `react-native-safe-area-context` (`SafeAreaView` /
-  `useSafeAreaInsets`), never padding hacks.
+  `GestureHandlerRootView` already (see `src/app/_layout.tsx`).
+- Safe areas: `StyledSafeAreaView` from `src/components/common/styled.ts`
+  or `useSafeAreaInsets` from `react-native-safe-area-context`, never
+  padding hacks.
 - Lists: `FlatList` accepts `className` and `contentContainerClassName`.
 - New dependency? It's a **team PR** — propose it, don't install it silently.
 
@@ -104,8 +113,8 @@ mode with the device simulator's appearance switch.
 - **Expo Router only** (file-based routes in `src/app/`). Never import
   `react-navigation` directly (banned by ESLint).
 - Route files (`src/app/*.tsx`) stay **thin**: they render screen components
-  from `src/screens/**`. Real UI lives in screens, so it can be tested
-  without the router (see F1's README).
+  from `src/screens/**`. Real UI lives in screens, so it stays reviewable and
+  router-independent.
 - **No secrets in route params or deep links.** Room code: yes.
   `player_token`: NEVER — it stays in secure storage (F3).
 
@@ -121,18 +130,34 @@ mode with the device simulator's appearance switch.
 - Map every protocol error code (see `src/types/protocol.ts`) to a friendly,
   themed UI message. Never show raw JSON.
 
-## 5. Code quality gates — run before every push
+## 5. Quality gates — run before every push
 
 ```bash
 cd frontend
 npm run typecheck   # tsc --noEmit — zero errors
 npm run lint        # eslint — zero errors/warnings
-npm test            # jest (jest-expo preset) — your module's tests pass
 ```
 
-CI (B4's workflow) runs the same three. TypeScript `strict` is on; no `any`
-in exported APIs. Component tests use `@testing-library/react-native`
-(behavior + props, not styling).
+CI (B4's workflow) runs the same two. TypeScript `strict` is on; no `any`
+in exported APIs.
+
+### Testing strategy (deliberate — no jest on the frontend)
+
+The frontend has **no unit-test runner by design**: jest-expo (SDK 58 +
+Jest 30) currently breaks on an upstream `expo-modules-core` ESM build bug,
+and the team decided UI quality is verified by humans. Instead:
+
+- **Wire contract**: `src/types/protocol.ts` is proven two ways —
+  `npm run typecheck` compiles the typed fixtures in
+  `src/types/protocol.fixtures.ts`, and `cargo test` on the backend
+  round-trips the identical JSON (`backend/tests/protocol_contract.rs`).
+- **UI**: manual testing on device/simulator. Each module README lists its
+  manual test checklist (steps + expected results) — run through it before
+  declaring a task done, and note what you checked in the PR description.
+- Fixtures in `src/types/protocol.fixtures.ts` double as realistic mock
+  data for building UI before the backend is connected.
+
+If a shared runner is added later, that is a team decision (B4 owns CI).
 
 ## 6. AI-assistant specifics
 

@@ -8,7 +8,7 @@ This is the **Rechess** Expo/React Native mobile app. Prioritize mobile-first pa
    - F2 → `src/components/chess/README.md`
    - F3 → `src/services/README.md`
    - F4 → `src/screens/game/README.md`
-3. Never add dependencies, edit configs (`app.json`, babel/metro/tailwind, `package.json`), or disable lint rules without a team PR.
+3. Never add dependencies, edit configs (`app.json`, `metro.config.js`, `package.json`, `global.css`), or disable lint rules without a team PR.
 4. Never commit or log `player_token` or any secret.
 
 ## Expo has changed — do not trust your training data
@@ -19,6 +19,12 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 2. Fetch the matching versioned docs: `https://docs.expo.dev/versions/v58.0.0/`
 3. For anything else, fetch https://docs.expo.dev/llms.txt — an index of all Expo docs with corrections to common LLM misconceptions. Follow its links to the specific page you need; never answer from memory.
 
+## Styling
+
+- **uniwind v1.14** (Tailwind CSS v4) via `className` only — see RULES.md §1. Semantic tokens live in `global.css` (repo root, CSS-first — no tailwind.config.js, no ThemeProvider); dark mode follows the system theme automatically. Third-party components get `className` via `withUniwind` in `src/components/common/styled.ts`.
+- **HeroUI Native v1.1** components (Button, Card, Input, …) — always granular imports like `heroui-native/button`, never the root import (banned by lint; breaks bundle-size optimization).
+- Animations with Reanimated 4.7; never the legacy `Animated` API.
+
 ## Commands
 
 ```bash
@@ -26,12 +32,13 @@ npx expo install <package>  # ALWAYS use instead of npm add — resolves SDK-com
 npx expo start              # start the dev server
 npm run lint                # eslint (enforces RULES.md)
 npm run typecheck           # tsc --noEmit
-npm test                    # jest (jest-expo preset)
 npx expo-doctor             # diagnose dependency and config issues
-npx expo install --fix      # fix incompatible package versions
+npx expo install --fix       # fix incompatible package versions
 ```
 
-Run lint, typecheck and tests before declaring any task done. CI (B4) runs the same.
+Run lint and typecheck before declaring any task done, plus your module's
+manual test checklist (RULES.md §5 — the frontend has no unit-test runner
+by design). CI (B4) runs the same.
 
 ## Navigation & Routing
 

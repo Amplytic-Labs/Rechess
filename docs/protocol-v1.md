@@ -90,8 +90,8 @@ unknown/missing fields in `payload` ⇒ `INVALID_PAYLOAD`.
 |---|---|---|
 | `game.state` | `GameSnapshot` | After every accepted state change (moves, draw accept, resign, rematch start) |
 | `player.presence` | `{ "player_id": string, "connected": boolean }` | Opponent connect/disconnect |
-| `game.move_rejected` | `{ "error": ErrorCode, "message": string, "revision": number, "snapshot": GameSnapshot \| null }` | A submitted move failed validation (to the mover only) |
-| `game.finished` | `{ "result": GameResult, "revision": number, "snapshot": GameSnapshot }` | Game over (checkmate / stalemate / draw / resignation) |
+| `game.move_rejected` | `{ "error": ErrorCode, "message": string, "snapshot": GameSnapshot \| null }` (envelope carries `revision`) | A submitted move failed validation (to the mover only) |
+| `game.finished` | `{ "result": GameResult, "snapshot": GameSnapshot }` (envelope carries `revision`) | Game over (checkmate / stalemate / draw / resignation) |
 | `server.error` | `{ "error": ErrorCode, "message": string }` | Any rejected command or protocol violation |
 
 ### 4.3 Shared payload objects
