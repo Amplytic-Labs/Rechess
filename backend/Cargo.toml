@@ -1,0 +1,42 @@
+[package]
+name = "rechess-backend"
+version = "0.1.0"
+edition = "2021"
+description = "Rechess — authoritative multiplayer chess backend (Rust, axum, tokio)"
+
+# See backend/README.md for the full version policy.
+# Exact resolved versions are pinned by Cargo.lock — always commit it.
+[dependencies]
+# --- HTTP / WebSocket transport (owner: B3) ---
+axum = { version = "0.8.9", features = ["ws"] }
+tower-http = { version = "0.7.1", features = ["trace"] } # TraceLayer for network/ (B3)
+
+# --- Async runtime ---
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net"] }
+
+# --- Serialization (owner: B3 for wire format) ---
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+# --- Logging / diagnostics ---
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+# --- Concurrency utilities (owner: B3 for split-socket tasks) ---
+futures-util = "0.3.34"
+
+# --- Chess rules (owner: B1 — run the Day-1 proof of concept, see src/game/README.md) ---
+# NOTE: shakmaty is GPL-3.0-or-later. If the assignment requires a permissive
+# license, agree with the team and swap to an alternative before building on it.
+shakmaty = "0.30.3"
+
+# --- Identity / randomness (owner: B2 for room codes and tokens) ---
+uuid = { version = "1.29.3", features = ["v4"] }
+rand = "0.10.4"
+
+# Dev-dependencies: none yet. B4 adds test dependencies (e.g. `tower` with the
+# `util` feature, for calling the router directly in tests) — see tests/README.md.
+
+[profile.release]
+lto = "thin"
+strip = "symbols"

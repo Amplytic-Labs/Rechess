@@ -1,0 +1,5 @@
+# Pin the whole team to one toolchain so builds are reproducible (B4).
+# Update this only as a team decision, together with Cargo.lock and CI.
+[toolchain]
+channel = "1.100.0"
+profile = "minimal"
