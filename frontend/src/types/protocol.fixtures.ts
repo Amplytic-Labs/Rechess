@@ -3,13 +3,13 @@
  * (`backend/src/protocol/mod.rs` → `sample_snapshot`, and
  * `backend/src/rooms/testkit.rs` → `sample_protocol_snapshot`).
  *
- * How the protocol contract is verified WITHOUT a frontend test runner
- * (see RULES.md §Testing — the frontend relies on type checking + backend
- * tests + manual UI testing):
+ * How the protocol contract is verified (see RULES.md §5):
  *
  *  1. `npm run typecheck` proves these fixtures satisfy the types in
  *     `protocol.ts` — the TS wire contract compiles against realistic data.
- *  2. `cargo test` on the backend proves the IDENTICAL JSON round-trips
+ *  2. `npm run test` pins the envelope shapes against these fixtures
+ *     (`src/types/protocol.test.ts`).
+ *  3. `cargo test` on the backend proves the IDENTICAL JSON round-trips
  *     through the Rust wire types (`backend/tests/protocol_contract.rs`).
  *
  * F1 / F2 / F4: import these fixtures to render screens and components

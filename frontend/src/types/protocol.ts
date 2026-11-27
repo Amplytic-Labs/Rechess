@@ -150,8 +150,8 @@ export type ClientCommand =
 
 /**
  * Client envelope: `{ "v": 1, "id": "<uuid>", "type": "…", "payload": {…} }`.
- * `v` must be PROTOCOL_VERSION; `id` is a unique command UUID (expo-crypto
- * `randomUUID()`) used for dedup on the server.
+ * `v` must be PROTOCOL_VERSION; `id` is a unique command UUID
+ * (`crypto.randomUUID()`) used for dedup on the server.
  */
 export type ClientEnvelope = { v: number; id: string } & ClientCommand;
 
