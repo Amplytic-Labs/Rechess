@@ -10,7 +10,7 @@
 |---|---|---|
 | `src/screens/lobby/`, `src/app/` routes for lobby, `src/components/common/` | **F1** | lobby screens, buttons/inputs, navigation |
 | `src/components/chess/` | **F2** | board, squares, pieces, highlights, promotion UI |
-| `src/services/`, `src/store/`, `src/types/`, `src/security/` | **F3** | WebSocket client, zustand stores, protocol types, token storage |
+| `src/services/`, `src/store/`, `src/types/`, `src/security/`, `src/hooks/` | **F3** | WebSocket client, zustand stores, protocol types, token storage |
 | `src/screens/game/` | **F4** | game screen composition, panels, history, results |
 | `src/theme/`, `global.css` | shared (F1 curates) | only via PR |
 | configs (`app.json`, `metro.config.js`, `package.json`) | shared (B4/F3 curate) | only via PR |

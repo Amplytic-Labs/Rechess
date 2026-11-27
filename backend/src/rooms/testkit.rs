@@ -10,11 +10,14 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use super::contract::{
-    CommandOutcome, CreateRoomError, JoinRoomError, PlayerCredentials, Resumed, ResumeError,
+    CommandOutcome, CreateRoomError, JoinRoomError, PlayerCredentials, ResumeError, Resumed,
     RoomClosed, RoomCommand, RoomCreated, RoomEvent, RoomHandle, RoomJoined, RoomRegistry,
 };
 use crate::game::PlayerColor;
-use crate::protocol::{GameSnapshot, GameStatus, MoveRecord, PlayerColor as WireColor, PlayerPublic, RoomPublicState, RoomStatus};
+use crate::protocol::{
+    GameSnapshot, GameStatus, MoveRecord, PlayerColor as WireColor, PlayerPublic, RoomPublicState,
+    RoomStatus,
+};
 
 #[derive(Default)]
 struct Shared {
@@ -131,7 +134,10 @@ impl FakeRegistry {
 impl RoomRegistry for FakeRegistry {
     type Handle = FakeHandle;
 
-    async fn create_room(&self, _nickname: &str) -> Result<RoomCreated<Self::Handle>, CreateRoomError> {
+    async fn create_room(
+        &self,
+        _nickname: &str,
+    ) -> Result<RoomCreated<Self::Handle>, CreateRoomError> {
         Ok(RoomCreated {
             room_code: self.room_code.clone(),
             credentials: PlayerCredentials {
@@ -144,7 +150,11 @@ impl RoomRegistry for FakeRegistry {
         })
     }
 
-    async fn join_room(&self, room_code: &str, _nickname: &str) -> Result<RoomJoined<Self::Handle>, JoinRoomError> {
+    async fn join_room(
+        &self,
+        room_code: &str,
+        _nickname: &str,
+    ) -> Result<RoomJoined<Self::Handle>, JoinRoomError> {
         if room_code != self.room_code {
             return Err(JoinRoomError::NotFound);
         }
@@ -159,7 +169,11 @@ impl RoomRegistry for FakeRegistry {
         })
     }
 
-    async fn resume_room(&self, room_code: &str, token: &str) -> Result<Resumed<Self::Handle>, ResumeError> {
+    async fn resume_room(
+        &self,
+        room_code: &str,
+        token: &str,
+    ) -> Result<Resumed<Self::Handle>, ResumeError> {
         if room_code != self.room_code {
             return Err(ResumeError::NotFound);
         }

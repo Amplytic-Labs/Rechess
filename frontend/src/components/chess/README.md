@@ -1,123 +1,186 @@
 # `src/components/chess/` — Owner: **F2** (Chessboard and Interaction Components)
 
-> **Read `frontend/RULES.md` first** — it is binding (no StyleSheet, no
-> expo-status-bar, everything themed, ownership map). Then read this file
-> completely before writing code.
+> **Read [`frontend/RULES.md`](../../../RULES.md) first** — it is binding
+> (no StyleSheet, uniwind `className` only, tokens only, no
+> `expo-status-bar`, Reanimated not `Animated`). Then read this file
+> completely before writing any code.
 
----
+Welcome, F2. This is your module's complete onboarding doc set. It tells you
+what to build, how to build it, and how to test it. Read it in order.
 
 ## 1. Your mission
 
-Deliver the reusable 8×8 **chessboard** component family: squares, pieces,
-selection, move highlighting and the pawn-promotion chooser. F4 embeds your
-board in the game screen; F3 feeds it the authoritative FEN and legal moves.
+Deliver the reusable 8×8 **chessboard** family that F4 embeds in the game
+screen:
 
-You are **not** implementing chess rules ("is this move legal?") — the server
-is the only authority. You render what the server-provided FEN says and
-highlight what the server-provided legal-move list allows.
+- the **board** (64 squares, square squares, both orientations),
+- the **pieces** (all 12 types, one asset strategy),
+- **highlights** (selected square, legal move targets, last move, check),
+- the **promotion picker** (Queen/Rook/Bishop/Knight chooser).
 
-## 2. What you own / what you don't touch
+You are NOT implementing chess rules. The Rust server is the only authority:
+you render what `snapshot.fen` says, and you highlight only what
+`snapshot.legal_moves` allows. Never compute legality, never mutate the
+position locally — after a tap you fire the callback and wait for the next
+snapshot (RULES.md §4).
+
+## 2. Boundaries — presentational, always
+
+Your components are **PRESENTATIONAL**. Data comes in via props; intents go
+out via one callback. That is the whole architecture (master plan §8: the
+board reports the attempted move; the state layer sends the command; the
+server response updates the board).
 
 | You own | You do NOT touch |
 |---|---|
-| `src/components/chess/**` | `src/screens/**` (F1 lobby, F4 game) |
-| The FEN → squares adapter for rendering | `src/services/`, `src/store/` (F3) — you consume their props |
-| Board orientation/flipping helpers | `src/types/protocol.ts` (F3) |
-| Piece asset strategy + rendering | Rules logic — never a client-side legality engine |
-| Promotion chooser UI | |
+| `src/components/chess/**` (all files, all decisions) | `src/screens/**` (F1 lobby, F4 game) |
+| The FEN → squares rendering adapter (`fenToPieces`) | `src/services/`, `src/store/`, `src/hooks/` (F3) — never import them |
+| Orientation/flipping helpers | `src/types/protocol.ts` (F3) — import from it, never edit it |
+| Piece rendering strategy | Sockets — exactly one WS exists in the app, owned by F3 |
+| Selection + highlight state (local UI state only) | Navigation (`expo-router`) — a component never navigates |
+| The promotion chooser UI | Chess-rules logic — no client-side legality engine, ever |
 
-## 3. The base that already exists (don't rebuild it)
+Never call a store (`useGameState`, `useRoomState`, …), never open a socket,
+never read `player_token`, never navigate. Your components receive a
+`GameSnapshot` plus a move-submission callback from F4's game screen and that
+is ALL they know about the world. This is why F4 can also render your board
+inside a dev harness with pure fixture props (see `03-manual-testing.md`).
 
-- NativeWind tokens for your board: **`board-light`, `board-dark`,
-  `move-target`, `last-move`, `check`** (defined in `tailwind.config.js`,
-  light+dark values in `src/theme/ThemeProvider.tsx`). Use ONLY these for
-  board colors — the board must work in dark mode with zero extra work.
-- `react-native-gesture-handler`, `react-native-reanimated` (installed;
-  `GestureHandlerRootView` already wraps the app), `react-native-safe-area-context`.
-- `expo-image` (installed) if you go with raster piece assets.
+## 3. This doc set
 
-## 4. Component contract (agree with F3 + F4 on Day 1, then freeze)
+| File | What it covers | When to read |
+|---|---|---|
+| `01-board-architecture.md` | Component tree, `fenToPieces` FEN adapter (exact algorithm + skeleton), orientation, square colors, sizing, rendering performance | Before writing the first file |
+| `02-pieces-and-interaction.md` | Piece asset options (recommendation), the tap-to-move state machine, highlights, promotion picker, disabled states, optional drag-and-drop | Days 2–6 |
+| `03-manual-testing.md` | Dev harness setup + the full MANUAL checklist (there is no jest on this frontend — by design) | Before you build, and before every PR |
+| `04-acceptance.md` | Definition of done mapped line-by-line to your brief; handoff notes for F4; open contract questions | Before declaring done |
+
+## 4. Prop contract (the contract F4's README points at)
+
+> F4's `src/screens/game/README.md` §3 references "F2's ChessBoard props
+> contract: `src/components/chess/README.md` §4" — that is this section.
+> **The exact final signature is agreed with F4** (they compose the game
+> screen and own the screen-side wiring). The shape below is the
+> recommended default: confirm it with F4 on Day 1, then freeze it. Any
+> change afterwards goes through a PR that updates both READMEs.
 
 ```tsx
-// Proposed props — finalize with F3/F4, then keep stable.
-type ChessBoardProps = {
-  fen: string;                       // authoritative position (from F3 store)
-  orientation: "white" | "black";    // local player at the bottom
-  legalMoves: string[];               // UCI-style from server, e.g. ["e2e4", "e7e8q"]
-  lastMove: { from: string; to: string } | null;
-  checkSquare: string | null;         // e.g. "e1" when in check (derive from FEN/status)
-  disabled: boolean;                  // not your turn / disconnected / pending
-  onMove: (move: { from: string; to: string; promotion?: "q" | "r" | "b" | "n" }) => void;
-};
+import type { GameSnapshot, PlayerColor, Promotion } from "@/types/protocol";
+
+/**
+ * Exactly the `game.move` payload from `src/types/protocol.ts` minus
+ * `expected_revision` — F3's store owns the revision and the envelope
+ * (`v`, `id`) when it sends. The board emits only the move itself.
+ */
+export interface BoardMove {
+  from: string;                // "e2" — square name
+  to: string;                  // "e4"
+  promotion: Promotion | null; // "q" | "r" | "b" | "n", or null when not
+                               // promoting — the wire field is ALWAYS
+                               // present, so it is null, never undefined
+}
+
+export interface ChessBoardProps {
+  /** The whole authoritative snapshot — F4 passes it from F3's store. */
+  snapshot: GameSnapshot;
+  /**
+   * Which color sits at the bottom = the LOCAL player's color.
+   * F4 gets it from F3's session state (`useRoomState().yourColor`) and
+   * passes it down. The board cannot know which player is local — it must
+   * never guess from `snapshot.players`.
+   */
+  orientation: PlayerColor; // "white" | "black"
+  /**
+   * Optional kill-switch for states NOT visible in the snapshot (a pending
+   * submitted move, a dropped connection). Turn/finished logic the board
+   * derives itself from the snapshot.
+   */
+  disabled?: boolean;
+  /** Submit an attempted move. The board never applies it locally. */
+  onMoveSubmit: (move: BoardMove) => void;
+}
 ```
 
-Suggested file layout (yours to adjust):
+Why the whole `GameSnapshot` instead of flat `fen` + `legalMoves` + `lastMove`
+props: F4 already has one snapshot object from F3's store, the snapshot is
+the unit the server sends (see `docs/protocol-v1.md` §4.3), and one prop
+means one memo identity — cheap re-render checks and zero drift between
+"which fen" and "which legal moves" during an update. If F4 prefers the flat
+form anyway, agree once and update this §4 + F4's README in the same PR.
 
-```
-src/components/chess/
-├── chess-board.tsx        // the 8×8 grid; composes everything below
-├── square.tsx             // one Pressable square with highlight states
-├── piece.tsx              // one of 12 piece types (asset strategy lives here)
-├── fen-board.ts           // PURE: fen → 64-square array (rendering only!)
-├── orientation.ts         // PURE: square mapping for white/black-at-bottom
-├── promotion-chooser.tsx  // modal: Q/R/B/N with clear labels
-└── chess-board.test.tsx   // component tests with FEN fixtures
-```
+**Flagged mismatches you should know about (fix via PR, don't edit others'
+files):**
 
-## 5. Behaviour requirements (your brief)
+- The previous version of this README proposed `ChessBoardProps` with flat
+  `fen` / `legalMoves` / `lastMove` / `checkSquare` props, `onMove`, jest
+  tests, and tokens in `tailwind.config.js`. All of that is **superseded**:
+  uniwind 1.14 + `global.css` tokens, the snapshot-based contract above, and
+  no test runner.
+- F4's README §6 mentions `npx jest game` — stale: RULES.md §5 says the
+  frontend has **no unit-test runner by design** (typecheck + lint + manual
+  checklists). Point it out to F4 so they can fix their README; do not add
+  jest yourself.
+- Your original brief (07_F2_Chessboard_Interaction.md) suggests
+  `checkedKingSquare?: string` as a prop and an `onMove(from, to, promotion?)`
+  callback. This doc set instead derives the king square from the FEN when
+  `game_status === "check"` (02 §3 — that is board math, not rules), and uses
+  a single `onMoveSubmit({ from, to, promotion })` object callback that
+  matches the wire payload exactly. Confirm with F4, then freeze.
 
-- Board renders from `fen` — parse it with your **pure** `fen-board.ts`
-  adapter (parsing for *rendering* only; it must never validate legality).
-- All 12 piece types render reliably on iOS + Android. Pick ONE asset
-  strategy (vector/SVG via react-native-svg — needs team PR per RULES.md §2 —
-  or glyph fonts, or raster assets via `expo-image`) and document your choice.
-- Orientation: when `orientation === "black"`, rank/file mapping flips; a1
-  must be top-right. Write `orientation.ts` as a pure function and test it.
-- Interaction flow: tap own piece → select + show its legal destinations
-  (filter `legalMoves` by `from`); tap highlighted square → `onMove`;
-  tap promotion square → show chooser → `onMove` with the chosen piece;
-  tap elsewhere → clear selection. **Never mutate the displayed position
-  locally** — the board updates only when `fen` changes from the server.
-- Highlights are visually distinct and never obscure pieces: selected
-  square, legal destinations (`move-target`), last move (`last-move`),
-  check (`check`), disabled/pending state.
-- Squares stay perfectly square and the board scales to available width
-  (`aspect-square`, one dimension from parent, `flex-1` rows/cols) — test on
-  small phones; no clipping, no stretching.
-- When `fen`/revision changes (server update, reconnect, resume): clear
-  selection, pending promotion and any local interaction state.
+## 5. Definition of done (summary — full mapping in `04-acceptance.md`)
 
-## 6. How to test your module independently
+- [ ] `ChessBoard` renders any `snapshot.fen` in both orientations, all 12
+      piece types, on a perfectly square board that scales to width.
+- [ ] Tap-to-move: select own piece → legal destinations from
+      `snapshot.legal_moves` only → submit via `onMoveSubmit` with the exact
+      `game.move` payload shape.
+- [ ] Highlights: selected, legal targets (`move-target`), last move
+      (`last-move`), check (`check`), all from board tokens in `global.css`,
+      all working in light AND dark mode.
+- [ ] Promotion picker asks before submitting; `promotion` is `null` for
+      non-promotion moves.
+- [ ] Board is inert when it isn't the local player's turn and when the game
+      is finished; local selection state resets when the snapshot changes.
+- [ ] `npm run typecheck` and `npm run lint` clean; the manual checklist in
+      `03-manual-testing.md` passed on iOS and Android, noted in the PR.
+- [ ] This README §4 updated with the final agreed prop names.
+
+## 6. Quickstart
 
 ```bash
 cd frontend
-npm run typecheck && npm run lint
-npx jest chess
+npm install            # once — lockfile is committed
+npm run typecheck      # tsc --noEmit — MUST be zero errors BEFORE you start
+npm run lint           # eslint — MUST be zero errors/warnings BEFORE you start
 ```
 
-- Fixtures as FEN constants (initial position, castling position, en-passant
-  position, promotion-ready position, midgame) — assert `fen-board.ts`
-  produces the right 64 squares and `orientation.ts` maps squares correctly
-  both ways.
-- Component tests: render `ChessBoard` with each fixture; assert 64 squares,
-  correct piece counts, selection + highlight behavior, promotion chooser
-  flow, `onMove` payloads, disabled state.
-- No sockets, no stores needed — the board is pure props in/props out
-  (that's exactly why the contract in §4 is frozen before you start).
+Record that clean baseline first, so any error you see later is yours. Then
+read `01-board-architecture.md` and build the board against fixture data —
+no server needed:
 
-## 7. Deliverables (definition of done)
+```tsx
+import { sampleSnapshot } from "@/types/protocol.fixtures";
+// render <ChessBoard snapshot={sampleSnapshot} orientation="black"
+//                    onMoveSubmit={(m) => console.log(m)} />
+// (position after 1.e4 — black to move, e7-pawn has moves e7e5/e7e6)
+```
 
-- [ ] `ChessBoard` + subcomponents rendering all pieces from FEN, both orientations
-- [ ] Selection, legal-destination highlights, last-move, check, disabled states
-- [ ] Promotion chooser (accessible, labeled)
-- [ ] Pure, unit-tested FEN + orientation adapters
-- [ ] Component tests on the fixture positions
-- [ ] Documented props + usage example in this README (update §4 with final names)
+How to actually see it on screen: the dev-harness approach in
+`03-manual-testing.md` §1 (a scratch screen in your own folder, temporarily
+pointed at by `src/app/index.tsx`, reverted before merge).
 
-## 8. Key coordination
+Quality gates before every push (RULES.md §5): `npm run typecheck` +
+`npm run lint` + your module's manual checklist. There is **no jest on this
+frontend by design** — never write test files; see RULES.md §5 for why.
 
-- **F3**: where FEN/legal moves come from and their exact encoding (see
-  `src/types/protocol.ts` and `docs/protocol-v1.md` — `legal_moves` is
-  UCI-style `"e2e4"` / `"e7e8q"`).
-- **F4**: they embed your board — prop names are a contract; changes via PR.
-- Asset choice (SVG vs font vs raster) touches `package.json` → team PR.
+## 7. Key coordination
+
+- **F3** owns `src/types/protocol.ts`, the stores and the hooks. If a
+  snapshot field is missing for you, ask F3 — never patch the type yourself.
+- **F4** composes your board; prop names are a contract (§4 above). Agree on
+  Day 1, freeze, change only via PR.
+- **F1** curates `global.css` tokens; if you need a new board token (e.g. a
+  dedicated `selected-square` color), that's a small PR against
+  `global.css`, not a local hardcode.
+- Piece asset strategy stays inside `src/components/chess/` — swapping it
+  must never change the component contract.

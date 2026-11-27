@@ -152,10 +152,7 @@ pub enum ServerEvent {
 
     /// Broadcast when a player connects/disconnects.
     #[serde(rename = "player.presence")]
-    PlayerPresence {
-        player_id: String,
-        connected: bool,
-    },
+    PlayerPresence { player_id: String, connected: bool },
 
     /// Targeted at the mover whose move failed. Envelope carries `revision`.
     #[serde(rename = "game.move_rejected")]
@@ -175,8 +172,5 @@ pub enum ServerEvent {
 
     /// Any rejected command or protocol violation.
     #[serde(rename = "server.error")]
-    ServerError {
-        error: ErrorCode,
-        message: String,
-    },
+    ServerError { error: ErrorCode, message: String },
 }

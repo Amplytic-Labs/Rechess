@@ -1,248 +1,118 @@
 # Module `rooms` — Owner: **B2** (Room Management and Game Lifecycle)
 
-> **Read this file completely before writing any code.**
-> It tells you what you are expected to do, how to do it, what the result must
-> be, and exactly where the boundary to your teammates' modules is — so that
-> nobody steps on anyone else's work.
+> **Onboarding documentation set for B2.** You implement the room registry and
+> the room actors behind the frozen contract. This folder's docs tell you what
+> to do, how to do it, and how to test it — in that order. Read them completely
+> before writing any code.
 
 ---
 
-## 1. Your mission
+## 1. Doc set index (read in this order)
 
-Deliver the room layer: create rooms, generate room codes, manage seats,
-tokens and reconnection, and give every room a **single actor task** that
-serializes all state changes. You turn B3's validated protocol commands into
-sequentially-processed `RoomCommand`s and produce outbound events both
-players receive.
+| # | File | What it gives you |
+|---|---|---|
+| — | **`README.md`** (this file) | Mission, boundaries, change rule, definition of done, day-one quickstart. |
+| 1 | [`01-contract.md`](01-contract.md) | The FROZEN traits (`RoomRegistry`, `RoomHandle`), every `RoomCommand` / `CommandOutcome` / `RoomEvent`, error→wire-code mapping, the game→protocol snapshot mapping (your integrator job), revision & dedup rules, deadlines. **Your bible for what the outside world expects.** |
+| 2 | [`02-architecture.md`](02-architecture.md) | The actor design: one tokio task per room, channel capacities and overflow policy, registry storage choice, room codes and tokens, expiry via tokio time, rematch. |
+| 3 | [`03-implementation-guide.md`](03-implementation-guide.md) | Concrete build order with partial skeleton code (registry → actor loop → join/resume → commands → events → expiry) and the pitfalls that bite. |
+| 4 | [`04-testing.md`](04-testing.md) | The complete test suite you ship (in-module `#[cfg(test)]` + `backend/tests/rooms_actor.rs`), with full code. |
+| 5 | [`05-acceptance.md`](05-acceptance.md) | Definition-of-done checklist mapped to your brief, merge-gate commands, handoff checklist for B3, open decisions. |
 
-You are **not** implementing chess rules (B1 owns `src/game/`) and **not**
-WebSockets or JSON (B3 owns `src/network/` and the wire types).
+Also relevant, owned by others:
 
-## 2. What you own / what you don't touch
+* `backend/src/rooms/contract.rs` — the frozen public API you implement (B3 consumes it).
+* `backend/src/rooms/testkit.rs` — `FakeRegistry`/`FakeHandle` for B3/B4 (shared infrastructure; NOT yours to rewrite).
+* `backend/src/game/contract.rs` + `game/testkit.rs` — B1's engine trait you own inside your actor, and `FakeEngine` for your tests.
+* `backend/src/protocol/server_message.rs` — the wire structs you assemble (`GameSnapshot`, `RoomPublicState`, `PlayerPublic`, `MoveRecord`).
+* `docs/protocol-v1.md` — the wire spec; **§5 (revision & idempotency semantics) is your bible**.
+* `backend/tests/testkit_demo.rs` — working tests against the rooms contract; model your test style on these.
 
-| You own (`src/rooms/`) | You do NOT touch |
-|---|---|
-| Room registry (code → room handle) | `src/game/` (B1) — you call its public API only |
-| One actor task per room owning its `RoomState` | `src/network/` (B3) |
-| Room code generation + collision checks | Wire-format structs (B3 owns them) |
-| Player seats, private reconnect tokens, token verification | `src/main.rs` (B3 asks, you expose) |
-| Room revision counter, command-ID dedup | `frontend/` (F-team) |
-| Disconnect grace, resume, expiry, rematch state | |
-| The rooms module's unit tests | |
+## 2. Mission
 
-## 3. Core architecture rules (from the master plan)
+Deliver the in-memory multiplayer room system behind the frozen contract:
 
-1. **One room actor owns the mutable state of one room.** Commands are
-   processed sequentially by that actor — there is never concurrent write
-   access to the same board. You achieve this with a Tokio task + a command
-   channel, **not** with a `Mutex<RoomState>` held across awaits.
-2. **Registry locks are never held across network I/O or awaits.** A short
-   `std::sync::Mutex`/`RwLock` over the code→handle map, cloned handle out,
-   guard dropped, then await. Never `.lock().await` chains.
-3. **All channels are bounded** (`tokio::sync::mpsc::channel(n)`, not
-   `unbounded`). Define what happens on a full queue (e.g. disconnect the
-   slow client); a slow client must not cause unbounded memory growth.
-4. WebSocket reader/writer separation happens in B3; you only publish
-   per-player outbound events.
+* a `RoomRegistry` (create / join / resume / lookup by room code),
+* one room **actor** per room owning all mutable state (engine, seats, revision, dedup, draw offers, rematch votes, deadlines),
+* anonymous player identity with private reconnect tokens (stored hashed),
+* room lifecycle: `waiting → active → finished → expired`, with disconnect grace, waiting-room and finished-room expiry,
+* rematch by mutual agreement via B1's engine,
+* and the **mapping job**: you assemble the wire `protocol::GameSnapshot` from `game::GameSnapshot` + room data. Nobody else does this.
 
-## 4. Facts you need on Day 1
+Two authenticated anonymous guests must be able to occupy one room, play a full game through your actor, disconnect and resume within the grace period, finish and rematch — with the actor as the single serialized point of truth.
 
-### The Tokio actor pattern (canonical shape)
+## 3. Boundaries
 
-```rust
-use tokio::sync::{mpsc, oneshot};
+**You implement** (inside `backend/src/rooms/` only):
 
-// A command with a reply channel — the actor processes them ONE AT A TIME.
-pub struct RoomCommand {
-    pub from_player: PlayerId,
-    pub action: RoomAction,          // your design: move/draw/resign/rematch/...
-    pub reply: oneshot::Sender<RoomOutcome>,   // optional for fire-and-forget
-}
+* the `RoomRegistry` + `RoomHandle` traits from `contract.rs` with your real registry and room actors,
+* room-code generation, seat allocation, token issuance/verification, revision counting, command-ID dedup,
+* disconnect grace, resume, expiry, rematch lifecycle,
+* this module's unit tests + `backend/tests/rooms_actor.rs`,
+* updates to THIS documentation set as your implementation lands (final names, capacities, decisions).
 
-pub struct RoomHandle {
-    tx: mpsc::Sender<RoomCommand>,
-    // your outbound event model (per-player and broadcast senders)
-}
+**You do NOT touch** (changes there require a PR agreed with the owner):
 
-impl RoomHandle {
-    pub async fn send(&self, cmd: RoomCommand) -> Result<RoomOutcome, RoomClosed> {
-        let (tx, rx) = oneshot::channel();
-        self.tx.send(RoomCommand { action: cmd.action, reply: tx, ..cmd }).await?;
-        rx.await.map_err(|_| RoomClosed)
-    }
-}
+| What | Owner | Why it's frozen/shared |
+|---|---|---|
+| `rooms/contract.rs` | B2 + B3 (jointly) | B3's network layer is generic over these traits; a signature change breaks B3 and B4's tests. |
+| `rooms/testkit.rs` | shared | B3/B4 test against these fakes; it must keep matching `contract.rs`. |
+| `game/contract.rs`, `game/testkit.rs`, `game/` impl | B1 (+ B2 for the contract) | You *consume* the engine trait; you never edit the engine. |
+| `protocol/` (all wire types) | B3 (+ F3) | You *construct* these structs; renames break the wire format. |
+| `network/`, `src/main.rs`, `src/lib.rs` | B3 | They wire your registry in; you expose it, they call it. |
+| `frontend/` | F-team | Out of backend scope. |
 
-async fn room_actor(mut rx: mpsc::Receiver<RoomCommand>, mut state: RoomState) {
-    while let Some(cmd) = rx.recv().await {
-        state.apply(cmd);   // sequential — no locking needed inside the actor
-    }
-}
-```
+**Change rule.** Any signature or semantic change to `rooms/contract.rs` (or to the parts of `game/contract.rs` you depend on) is a **PR agreed by B2 + B3** (plus B1 if the engine trait is affected), updating the contract, the testkit, `docs/protocol-v1.md` and `frontend` types in the same reviewed change. Never "just tweak" a frozen signature in your branch.
 
-Reference implementations to read (the pattern is standard): the *Tokio
-tutorial — "Shared state" and "Channels"* chapters, and Alice Ryhl's
-*"Actor implementation"* / *"Actor with channels"* guides.
+## 4. Definition of done (summary — full checklist in [`05-acceptance.md`](05-acceptance.md))
 
-### Room codes and tokens (crates already pinned in `Cargo.toml`)
+A task is done only when its code is merged, its tests pass, its interface is documented, and the next owner (B3) can integrate without reverse-engineering assumptions. Concretely:
 
-- `uuid = "1.29.3"` (feature `v4`): `Uuid::new_v4()` — OS-entropy based.
-- `rand = "0.10.4"`: current API is `rand::rng()` (NOT the old
-  `thread_rng()`), `rand::random_range(0..alphabet.len())`, and
-  `rand::fill(&mut bytes)`. Verify on Day 1 that `rand::rng()` implements
-  `CryptoRng`; if it does not, generate codes/tokens from OS entropy
-  (e.g. via the `getrandom`/`OsRng` route) — your brief requires a
-  *cryptographically secure* random source for codes and reconnect tokens.
+- [ ] Real `RoomRegistry`/`RoomHandle` implementation behind the frozen traits; all channels bounded with documented overflow behaviour.
+- [ ] Create → White host seat + private token; join → Black guest (first-wins on races); resume by token → full snapshot.
+- [ ] Revision counter (monotonic from 0, bumped on every accepted state change) + stale-revision rejection with `STALE_REVISION`.
+- [ ] Command-ID dedup window per player (bounded) — *pending the `command_id` contract gap, see [01-contract.md §10](01-contract.md)*.
+- [ ] Disconnect grace (60 s) → resume cancels → full snapshot; waiting-room expiry (10 min) and finished-room retention (10 min) close rooms without leaking tasks/channels.
+- [ ] Draw offer/accept, resign, rematch-by-both-votes via B1's engine (`reset_for_rematch`).
+- [ ] The game→protocol snapshot mapping (`From` impls + `build_snapshot` in your module).
+- [ ] The test suite of [04-testing.md](04-testing.md) green: `cargo test rooms::` + `cargo test --test rooms_actor`.
+- [ ] This doc set updated with your final type/module names and decisions.
 
-```rust
-// Room code: 8 chars, no visually ambiguous characters (no 0/O, 1/I/L).
-const CODE_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
-fn generate_room_code() -> String {
-    // sample 8 indices from CODE_ALPHABET with the secure rng;
-    // then CHECK FOR COLLISION against active rooms before inserting.
-    todo!("Day-1 PoC")
-}
+## 5. Testing
 
-// Reconnect token: opaque, high-entropy, private.
-// Store only a HASH/verifier in RoomState — never the token itself —
-// and never include it in any broadcast, event or log line.
-fn generate_player_token() -> String { todo!("uuid or 32 random bytes hex") }
-```
-
-## 5. Your contracts with neighbours
-
-### From B1 (`src/game/`) you consume
-
-```rust
-let mut engine = ChessEngine::new_game();
-let snap = engine.apply_move(from, to, promotion)?;   // typed GameError
-let snap = engine.resign(side)?;                       // etc.
-```
-
-You wrap B1's `ChessEngine` as the room's authoritative game state. **Your
-room actor** must validate that the sending player is allowed to submit the
-requested action (correct seat, correct turn via B1's error) before calling
-the engine. Before B1's final API is agreed (Day 1), you can stub the engine
-behind a tiny trait of your own so your tests run without B1's code.
-
-### To B3 you hand off (this is the critical contract for linking)
-
-B3 must never access or mutate `RoomState` directly. Publish exactly this
-shape of API and agree the final names with B3 **on Day 1**:
-
-```rust
-pub struct RoomRegistry { /* code → handle map, insert/expiry logic */ }
-
-impl RoomRegistry {
-    /// Create a room; host sits White. Returns the public room code, the
-    /// host's player id + PRIVATE reconnect token, and a RoomHandle.
-    pub async fn create_room(&self, host_nickname: String) -> CreateRoomResult;
-    /// Find a room by normalized (uppercased, trimmed) room code.
-    pub fn lookup(&self, code: &str) -> Option<RoomHandle>;
-}
-
-pub enum JoinError { Full, NotFound, AlreadyActive, Expired }
-pub enum ResumeError { NotFound, InvalidToken, /* ... */ }
-
-pub struct CreateRoomResult {
-    pub room_code: String,
-    pub player_id: PlayerId,
-    pub player_token: String,        // PRIVATE — B3 returns it only to the creator
-    pub handle: RoomHandle,
-    // B2 owns how outcomes distinguish private responses from public broadcasts
-}
-```
-
-Requirements on this boundary:
-
-- Join/Resume results **must distinguish** the private credential response
-  from the public room snapshot, so B3 can send the token to exactly one
-  connection and broadcast only public data.
-- Outbound event model: the room actor publishes per-player events (targeted
-  responses) and public room/game broadcasts. Design the sender side; B3 owns
-  the receiver→socket side.
-
-## 6. Required behaviour checklist (your brief, expanded)
-
-- Room codes: 8 chars, unambiguous alphabet, collision-checked, unique among
-  *active* rooms.
-- `create` → host in White seat, Black empty, status `waiting`.
-- `join` → only into a `waiting` room with a free seat; exactly one of two
-  simultaneous joins wins. Malformed/full/active/expired codes → stable typed
-  errors mapped by B3 to `ROOM_NOT_FOUND` / `ROOM_FULL` / ...
-- Reconnect token: stored hashed; a resume with a valid token cancels the
-  disconnect deadline and returns the **full current snapshot** (revision
-  included).
-- Revision: monotonically increasing, bumped on every accepted
-  state-changing command; commands with stale `expected_revision` are
-  rejected (mapped by B3 to `STALE_REVISION`).
-- Command-ID dedup: remember recent command IDs per room/player within a
-  bounded window so client retries never apply a move twice.
-- Status transitions: `waiting → active → finished → (retention) → expired`.
-  Expiry removes the room and its actor without leaking tasks/channels
-  (drop all senders; the actor's `recv()` returns `None` and ends the task).
-- Rematch: both players must vote; then reset board/history/draw state via
-  B1's `reset_for_rematch()` and restart with a fresh game identity.
-- Room isolation: activity in room A can never affect room B (B4 tests this
-  with 50+ rooms).
-
-## 7. Suggested module layout (yours to adjust)
-
-```
-src/rooms/
-├── mod.rs        // re-exports; pub use RoomRegistry, RoomHandle
-├── registry.rs   // code → handle map, code generation, expiry sweep
-├── room.rs       // RoomState, seats, status transitions, revision
-├── room_actor.rs // the actor loop + command handling
-├── player.rs     // PlayerId, seat, token verifier (hashed)
-├── errors.rs     // JoinError / ResumeError / RoomError (typed, stable)
-└── events.rs     // outbound event model for B3
-```
-
-## 8. How to test your module independently
-
-No sockets needed. Use `#[tokio::test]` with real channels:
+Your tests are specified in [04-testing.md](04-testing.md). Two commands gate your module:
 
 ```bash
-cd backend
-cargo test rooms::
+cargo test rooms::            # in-module unit tests (registry, actor, codes, tokens, lifecycle)
+cargo test --test rooms_actor  # integration tests through the public traits
 ```
 
-Test list (from your brief — turn each into a test before B4 asks):
+Today only the fakes' tests exist (`backend/tests/testkit_demo.rs`); both commands match **zero** of your own tests until you write them. The fakes in `testkit.rs` and `game/testkit.rs` are *reference and infrastructure* — B3/B4 test against the fakes, you test your REAL implementation (using B1's `FakeEngine` only as the engine seam inside your actor).
 
-1. Create → unique code, host in White seat.
-2. Join valid waiting room; reject invalid/full/active/expired codes.
-3. Two simultaneous joins for one remaining seat → exactly one succeeds
-   (`tokio::join!` two `send`s).
-4. Wrong-room or wrong-seat token cannot move or resume.
-5. A second player cannot overwrite an existing seat.
-6. One room actor serializes concurrent move requests (spawn many commands,
-   assert order/revision).
-7. Stale revision and duplicate command ID are rejected safely.
-8. Disconnect starts the grace deadline; resume cancels it and returns the
-   latest state (use `tokio::time::pause()` or short deadlines in tests).
-9. Expiry removes room + registry entry without leaking the task
-   (`tokio::task::yield_now()` then assert the actor ended).
-10. Rematch requires both votes and resets the game consistently.
+## 6. Day-one quickstart
 
-For engine-dependent tests, inject B1's engine — or a minimal fake behind
-the trait — so your tests don't block on B1's progress, then swap in the
-real one when their vertical slice lands (Day 3–4).
+**Read order (half a day, before any code):**
 
-## 9. Deliverables (definition of done)
+1. This README, then [01-contract.md](01-contract.md) (every signature, against `contract.rs` itself).
+2. `backend/src/game/contract.rs` — the engine you will own inside each actor.
+3. [02-architecture.md](02-architecture.md), then [03-implementation-guide.md](03-implementation-guide.md).
+4. `docs/protocol-v1.md` §5 (revision & idempotency) and §7 (reconnect flow).
+5. `backend/tests/testkit_demo.rs` — the test style that already compiles.
+6. [04-testing.md](04-testing.md) and [05-acceptance.md](05-acceptance.md).
 
-- [ ] `RoomRegistry` + `RoomHandle` + actor task per room, channels bounded
-- [ ] Typed, stable errors for every join/resume/lifecycle failure
-- [ ] Revision counter + command-ID dedup window
-- [ ] Disconnect grace → resume → full snapshot flow
-- [ ] Status transitions with retention expiry and no resource leaks
-- [ ] Rematch by mutual agreement resetting via B1's engine
-- [ ] Unit tests for §8 (all 10 scenarios)
-- [ ] This folder's README updated with your final public API (§5)
+**Verify the base builds and is green before you start** (toolchain env required for every cargo command):
 
-## 10. Key coordination
+```bash
+export PATH=/tmp/rust/cargo/bin:$PATH RUSTUP_HOME=/tmp/rust/rustup CARGO_HOME=/tmp/rust/cargo
+cd /home/z/my-project/Rechess/backend
+cargo build && cargo test
+```
 
-- **B1** daily: engine/room boundary, seat authorization before engine calls.
-- **B3** from Day 1: registry/handle API, outbound event model, revision and
-  dedup semantics (B3 maps them to the wire; B3 owns `docs/protocol-v1.md`).
-- **B4** from Day 1: they will test your races and lifecycle — give them
-  deterministic fixtures and small delays/deadline knobs early.
+Expected today: builds clean, **15 tests pass** (4 in `protocol` unit tests, 7 in `tests/protocol_contract.rs`, 4 in `tests/testkit_demo.rs`). If that is not what you see, stop and sync with B4 before building on top of a broken base.
+
+**Then** follow the build order in [03-implementation-guide.md](03-implementation-guide.md) — registry shell first, actor loop second, and so on, with a green checkpoint after each stage.
+
+## 7. Key coordination
+
+* **B1 (daily):** engine factory convention (`new_engine() -> Box<dyn ChessEngine>`), which `GameError` each engine call returns in each edge case (e.g. `accept_draw` with no active offer).
+* **B3 (from Day 1):** registry/command/event interfaces, revision semantics, dedup (the `command_id` gap), room-code normalization ownership, capacities and drop policy.
+* **B4 (from Day 1):** they will test your races and lifecycle — give them deterministic fixtures and short/deadline knobs early (see `RoomConfig` in [02-architecture.md](02-architecture.md)).

@@ -26,7 +26,12 @@ fn doc_section_2_1_example_round_trips() {
     assert_eq!(envelope.v, 1);
     assert_eq!(envelope.id, "cmd-unique-001");
     match &envelope.command {
-        ClientCommand::MakeMove { from, to, promotion, expected_revision } => {
+        ClientCommand::MakeMove {
+            from,
+            to,
+            promotion,
+            expected_revision,
+        } => {
             assert_eq!((from.as_str(), to.as_str()), ("e2", "e4"));
             assert_eq!(*promotion, None);
             assert_eq!(*expected_revision, 12);
@@ -46,16 +51,27 @@ fn game_state_payload_is_the_snapshot() {
     let envelope = ServerEnvelope {
         v: PROTOCOL_VERSION,
         revision: Some(13),
-        event: ServerEvent::GameState { snapshot: sample_protocol_snapshot() },
+        event: ServerEvent::GameState {
+            snapshot: sample_protocol_snapshot(),
+        },
     };
     let value = serde_json::to_value(&envelope).expect("serializes");
     assert_eq!(value["type"], "game.state");
     assert_eq!(value["revision"], 13);
     // Snapshot fields sit directly in the payload…
-    assert!(value["payload"].get("fen").is_some(), "fen must be in the payload");
-    assert!(value["payload"].get("turn").is_some(), "turn must be in the payload");
+    assert!(
+        value["payload"].get("fen").is_some(),
+        "fen must be in the payload"
+    );
+    assert!(
+        value["payload"].get("turn").is_some(),
+        "turn must be in the payload"
+    );
     // …not nested under a "snapshot" key.
-    assert!(value["payload"].get("snapshot").is_none(), "no nested snapshot key");
+    assert!(
+        value["payload"].get("snapshot").is_none(),
+        "no nested snapshot key"
+    );
 }
 
 /// `player_token` appears ONLY in the private `room.created`/`room.joined` events.
@@ -90,23 +106,48 @@ fn only_room_created_joined_carry_player_token() {
     ];
     for event in private_events {
         let text = serde_json::to_string(&event).expect("serializes");
-        assert!(text.contains("player_token"), "private event must carry the token: {text}");
+        assert!(
+            text.contains("player_token"),
+            "private event must carry the token: {text}"
+        );
     }
 
     let public_events = vec![
-        ServerEvent::SessionReady { player_id: "host".into(), color: PlayerColor::White, snapshot: snapshot.clone() },
-        ServerEvent::GameState { snapshot: snapshot.clone() },
-        ServerEvent::PlayerPresence { player_id: "host".into(), connected: false },
-        ServerEvent::MoveRejected { error: ErrorCode::IllegalMove, message: "not legal".into(), snapshot: Some(snapshot.clone()) },
-        ServerEvent::GameFinished {
-            result: GameResult { winner: Some(PlayerColor::White), reason: GameResultReason::Checkmate },
+        ServerEvent::SessionReady {
+            player_id: "host".into(),
+            color: PlayerColor::White,
             snapshot: snapshot.clone(),
         },
-        ServerEvent::ServerError { error: ErrorCode::Internal, message: "nope".into() },
+        ServerEvent::GameState {
+            snapshot: snapshot.clone(),
+        },
+        ServerEvent::PlayerPresence {
+            player_id: "host".into(),
+            connected: false,
+        },
+        ServerEvent::MoveRejected {
+            error: ErrorCode::IllegalMove,
+            message: "not legal".into(),
+            snapshot: Some(snapshot.clone()),
+        },
+        ServerEvent::GameFinished {
+            result: GameResult {
+                winner: Some(PlayerColor::White),
+                reason: GameResultReason::Checkmate,
+            },
+            snapshot: snapshot.clone(),
+        },
+        ServerEvent::ServerError {
+            error: ErrorCode::Internal,
+            message: "nope".into(),
+        },
     ];
     for event in public_events {
         let text = serde_json::to_string(&event).expect("serializes");
-        assert!(!text.contains("token"), "token leaked into a public event: {text}");
+        assert!(
+            !text.contains("token"),
+            "token leaked into a public event: {text}"
+        );
     }
 }
 
@@ -116,23 +157,36 @@ fn revision_lives_on_the_envelope_only() {
     let envelope = ServerEnvelope {
         v: PROTOCOL_VERSION,
         revision: Some(7),
-        event: ServerEvent::MoveRejected { error: ErrorCode::StaleRevision, message: "stale".into(), snapshot: None },
+        event: ServerEvent::MoveRejected {
+            error: ErrorCode::StaleRevision,
+            message: "stale".into(),
+            snapshot: None,
+        },
     };
     let value = serde_json::to_value(&envelope).expect("serializes");
     assert_eq!(value["revision"], 7);
-    assert!(value["payload"].get("revision").is_none(), "revision must not repeat in the payload");
+    assert!(
+        value["payload"].get("revision").is_none(),
+        "revision must not repeat in the payload"
+    );
 
     let envelope = ServerEnvelope {
         v: PROTOCOL_VERSION,
         revision: Some(9),
         event: ServerEvent::GameFinished {
-            result: GameResult { winner: None, reason: GameResultReason::DrawAgreed },
+            result: GameResult {
+                winner: None,
+                reason: GameResultReason::DrawAgreed,
+            },
             snapshot: sample_protocol_snapshot(),
         },
     };
     let value = serde_json::to_value(&envelope).expect("serializes");
     assert_eq!(value["revision"], 9);
-    assert!(value["payload"].get("revision").is_none(), "revision must not repeat in the payload");
+    assert!(
+        value["payload"].get("revision").is_none(),
+        "revision must not repeat in the payload"
+    );
 }
 
 /// Malformed or unknown input is rejected with an error, never a panic.
@@ -142,8 +196,8 @@ fn malformed_and_unknown_commands_fail_cleanly() {
         r#"{ "v": 1, "id": "x", "type": "pizza.order", "payload": {} }"#, // unknown type
         r#"{ "v": 1, "id": "x", "type": "game.move", "payload": { "from": 42, "to": "e4", "expected_revision": 1 } }"#, // wrong field type
         r#"{ "v": 1, "id": "x", "type": "game.move", "payload": {} }"#, // missing fields
-        r#"{ "v": 1, "id": "x" }"#, // no type/payload at all
-        r#"{ "v": 1 "#,              // truncated JSON
+        r#"{ "v": 1, "id": "x" }"#,                                     // no type/payload at all
+        r#"{ "v": 1 "#,                                                 // truncated JSON
         "not json at all",
     ];
     for input in bad_inputs {
@@ -176,7 +230,10 @@ fn every_error_code_round_trips() {
         let back: ErrorCode = serde_json::from_str(&text).expect("reparses");
         assert_eq!(code, back);
     }
-    assert_eq!(serde_json::to_string(&ErrorCode::NotYourTurn).unwrap(), r#""NOT_YOUR_TURN""#);
+    assert_eq!(
+        serde_json::to_string(&ErrorCode::NotYourTurn).unwrap(),
+        r#""NOT_YOUR_TURN""#
+    );
 }
 
 /// Promotion letters on the wire: "q" | "r" | "b" | "n".

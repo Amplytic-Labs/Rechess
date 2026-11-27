@@ -31,7 +31,13 @@ pub struct FakeEngine {
 
 impl FakeEngine {
     pub fn new(snapshot: GameSnapshot) -> Self {
-        Self { snapshot, errors: Vec::new(), moves: Vec::new(), calls: Vec::new(), reset_count: 0 }
+        Self {
+            snapshot,
+            errors: Vec::new(),
+            moves: Vec::new(),
+            calls: Vec::new(),
+            reset_count: 0,
+        }
     }
 
     /// Queue an error for the next fallible call.
@@ -87,9 +93,21 @@ pub fn starting_snapshot() -> GameSnapshot {
         last_move: None,
         history_san: Vec::new(),
         legal_moves: vec![
-            "a2a3".into(), "a2a4".into(), "b2b3".into(), "b2b4".into(), "c2c3".into(),
-            "c2c4".into(), "d2d3".into(), "d2d4".into(), "e2e3".into(), "e2e4".into(),
-            "f2f3".into(), "f2f4".into(), "g2g3".into(), "g2g4".into(), "h2h3".into(),
+            "a2a3".into(),
+            "a2a4".into(),
+            "b2b3".into(),
+            "b2b4".into(),
+            "c2c3".into(),
+            "c2c4".into(),
+            "d2d3".into(),
+            "d2d4".into(),
+            "e2e3".into(),
+            "e2e4".into(),
+            "f2f3".into(),
+            "f2f4".into(),
+            "g2g3".into(),
+            "g2g4".into(),
+            "h2h3".into(),
             "h2h4".into(),
         ],
         draw_offered_by: None,
@@ -106,7 +124,11 @@ pub fn foolsmate_snapshot() -> GameSnapshot {
             winner: Some(PlayerColor::Black),
             reason: GameResultReason::Checkmate,
         }),
-        last_move: Some(MoveRecord { from: "h4".into(), to: "h1".into(), san: "Qh4#".into() }),
+        last_move: Some(MoveRecord {
+            from: "h4".into(),
+            to: "h1".into(),
+            san: "Qh4#".into(),
+        }),
         history_san: vec!["f3".into(), "e5".into(), "g4".into(), "Qh4#".into()],
         legal_moves: Vec::new(),
         draw_offered_by: None,
@@ -115,5 +137,9 @@ pub fn foolsmate_snapshot() -> GameSnapshot {
 
 /// Convenience re-export so test code can build a promotion move quickly.
 pub fn promotion_move() -> MoveRequest {
-    MoveRequest { from: "e7".into(), to: "e8".into(), promotion: Some(Promotion::Queen) }
+    MoveRequest {
+        from: "e7".into(),
+        to: "e8".into(),
+        promotion: Some(Promotion::Queen),
+    }
 }

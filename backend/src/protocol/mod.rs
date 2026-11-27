@@ -51,7 +51,12 @@ mod tests {
         assert_eq!(envelope.v, 1);
         assert_eq!(envelope.id, "cmd-unique-001");
         match &envelope.command {
-            ClientCommand::MakeMove { from, to, promotion, expected_revision } => {
+            ClientCommand::MakeMove {
+                from,
+                to,
+                promotion,
+                expected_revision,
+            } => {
                 assert_eq!((from.as_str(), to.as_str()), ("e2", "e4"));
                 assert_eq!(*promotion, None);
                 assert_eq!(*expected_revision, 12);
@@ -68,21 +73,82 @@ mod tests {
     #[test]
     fn every_client_command_round_trips() {
         let envelopes: Vec<ClientEnvelope> = vec![
-            ClientEnvelope { v: PROTOCOL_VERSION, id: "a".into(), command: ClientCommand::CreateRoom { nickname: "Guest 1".into() } },
-            ClientEnvelope { v: PROTOCOL_VERSION, id: "b".into(), command: ClientCommand::JoinRoom { room_code: "ABC23XY9".into(), nickname: "Guest 2".into() } },
-            ClientEnvelope { v: PROTOCOL_VERSION, id: "c".into(), command: ClientCommand::ResumeSession { room_code: "ABC23XY9".into(), player_token: "secret".into() } },
-            ClientEnvelope { v: PROTOCOL_VERSION, id: "d".into(), command: ClientCommand::MakeMove { from: "e7".into(), to: "e8".into(), promotion: Some(Promotion::Q), expected_revision: 5 } },
-            ClientEnvelope { v: PROTOCOL_VERSION, id: "e".into(), command: ClientCommand::OfferDraw { expected_revision: 5 } },
-            ClientEnvelope { v: PROTOCOL_VERSION, id: "f".into(), command: ClientCommand::AcceptDraw { expected_revision: 6 } },
-            ClientEnvelope { v: PROTOCOL_VERSION, id: "g".into(), command: ClientCommand::Resign { expected_revision: 6 } },
-            ClientEnvelope { v: PROTOCOL_VERSION, id: "h".into(), command: ClientCommand::Rematch { expected_revision: 6 } },
-            ClientEnvelope { v: PROTOCOL_VERSION, id: "i".into(), command: ClientCommand::LeaveRoom },
+            ClientEnvelope {
+                v: PROTOCOL_VERSION,
+                id: "a".into(),
+                command: ClientCommand::CreateRoom {
+                    nickname: "Guest 1".into(),
+                },
+            },
+            ClientEnvelope {
+                v: PROTOCOL_VERSION,
+                id: "b".into(),
+                command: ClientCommand::JoinRoom {
+                    room_code: "ABC23XY9".into(),
+                    nickname: "Guest 2".into(),
+                },
+            },
+            ClientEnvelope {
+                v: PROTOCOL_VERSION,
+                id: "c".into(),
+                command: ClientCommand::ResumeSession {
+                    room_code: "ABC23XY9".into(),
+                    player_token: "secret".into(),
+                },
+            },
+            ClientEnvelope {
+                v: PROTOCOL_VERSION,
+                id: "d".into(),
+                command: ClientCommand::MakeMove {
+                    from: "e7".into(),
+                    to: "e8".into(),
+                    promotion: Some(Promotion::Q),
+                    expected_revision: 5,
+                },
+            },
+            ClientEnvelope {
+                v: PROTOCOL_VERSION,
+                id: "e".into(),
+                command: ClientCommand::OfferDraw {
+                    expected_revision: 5,
+                },
+            },
+            ClientEnvelope {
+                v: PROTOCOL_VERSION,
+                id: "f".into(),
+                command: ClientCommand::AcceptDraw {
+                    expected_revision: 6,
+                },
+            },
+            ClientEnvelope {
+                v: PROTOCOL_VERSION,
+                id: "g".into(),
+                command: ClientCommand::Resign {
+                    expected_revision: 6,
+                },
+            },
+            ClientEnvelope {
+                v: PROTOCOL_VERSION,
+                id: "h".into(),
+                command: ClientCommand::Rematch {
+                    expected_revision: 6,
+                },
+            },
+            ClientEnvelope {
+                v: PROTOCOL_VERSION,
+                id: "i".into(),
+                command: ClientCommand::LeaveRoom {},
+            },
         ];
         for envelope in envelopes {
             let text = serde_json::to_string(&envelope).unwrap();
             let reparsed: ClientEnvelope = serde_json::from_str(&text).unwrap();
             let back = serde_json::to_string(&reparsed).unwrap();
-            assert_eq!(text, back, "unstable wire format for {:?}", envelope.command);
+            assert_eq!(
+                text, back,
+                "unstable wire format for {:?}",
+                envelope.command
+            );
         }
     }
 
@@ -98,7 +164,10 @@ mod tests {
         let text = serde_json::to_string(&envelope).unwrap();
         assert!(text.contains(r#""type":"game.state""#), "got: {text}");
         assert!(text.contains(r#""revision":13"#), "got: {text}");
-        assert!(!text.contains("player_token"), "no token may appear in a broadcast event");
+        assert!(
+            !text.contains("player_token"),
+            "no token may appear in a broadcast event"
+        );
         let reparsed: ServerEnvelope = serde_json::from_str(&text).unwrap();
         assert!(matches!(reparsed.event, ServerEvent::GameState { .. }));
         assert_eq!(reparsed.revision, Some(13));
@@ -124,12 +193,26 @@ mod tests {
             result: None,
             fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1".into(),
             turn: PlayerColor::Black,
-            last_move: Some(MoveRecord { from: "e2".into(), to: "e4".into(), san: "e4".into() }),
+            last_move: Some(MoveRecord {
+                from: "e2".into(),
+                to: "e4".into(),
+                san: "e4".into(),
+            }),
             move_history: vec!["e4".into()],
             legal_moves: vec!["e7e5".into(), "e7e6".into()],
             players: vec![
-                PlayerPublic { id: "p1".into(), nickname: "Guest 1".into(), color: PlayerColor::White, connected: true },
-                PlayerPublic { id: "p2".into(), nickname: "Guest 2".into(), color: PlayerColor::Black, connected: true },
+                PlayerPublic {
+                    id: "p1".into(),
+                    nickname: "Guest 1".into(),
+                    color: PlayerColor::White,
+                    connected: true,
+                },
+                PlayerPublic {
+                    id: "p2".into(),
+                    nickname: "Guest 2".into(),
+                    color: PlayerColor::Black,
+                    connected: true,
+                },
             ],
             draw_offer: None,
         }

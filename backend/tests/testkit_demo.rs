@@ -5,15 +5,15 @@
 //! Runs green today against the fakes; the same shape of tests will run
 //! against the real engine/registry when those modules land (B4's merge gate).
 
-use rechess_backend::game::{GameError, MoveRequest, PlayerColor};
 use rechess_backend::game::testkit::{starting_snapshot, FakeEngine};
 use rechess_backend::game::ChessEngine as _;
+use rechess_backend::game::{GameError, MoveRequest, PlayerColor};
+use rechess_backend::protocol::ErrorCode;
 use rechess_backend::rooms::testkit::{FakeHandle, FakeRegistry};
 use rechess_backend::rooms::{
     CommandOutcome, JoinRoomError, ResumeError, RoomClosed, RoomCommand, RoomEvent, RoomEventKind,
     RoomHandle as _, RoomRegistry,
 };
-use rechess_backend::protocol::ErrorCode;
 
 /// B1's contract: the fake satisfies it, so will the real engine.
 #[tokio::test]
@@ -22,7 +22,11 @@ async fn fake_engine_scripts_results_and_records_calls() {
 
     // Success path: apply a move, get a snapshot back.
     let snapshot = engine
-        .apply_move(MoveRequest { from: "e2".into(), to: "e4".into(), promotion: None })
+        .apply_move(MoveRequest {
+            from: "e2".into(),
+            to: "e4".into(),
+            promotion: None,
+        })
         .expect("fake accepts by default");
     assert!(snapshot.fen.contains('r'), "snapshot carries a FEN");
     assert_eq!(engine.moves.len(), 1, "move was recorded");
@@ -30,7 +34,11 @@ async fn fake_engine_scripts_results_and_records_calls() {
     // Failure path: script the next error.
     engine.fail_next_with(GameError::WrongTurn);
     let err = engine
-        .apply_move(MoveRequest { from: "e2".into(), to: "e4".into(), promotion: None })
+        .apply_move(MoveRequest {
+            from: "e2".into(),
+            to: "e4".into(),
+            promotion: None,
+        })
         .expect_err("scripted failure");
     assert_eq!(err, GameError::WrongTurn);
 
@@ -49,7 +57,10 @@ async fn fake_registry_serves_the_room_lifecycle() {
     let created = registry.create_room("Host").await.expect("create ok");
     assert_eq!(created.room_code, "TESTCODE1");
     assert_eq!(created.credentials.color, PlayerColor::White);
-    assert_eq!(created.room.status, rechess_backend::protocol::RoomStatus::Waiting);
+    assert_eq!(
+        created.room.status,
+        rechess_backend::protocol::RoomStatus::Waiting
+    );
 
     // Wrong code → NotFound; wrong token → InvalidToken (mirrors B3's wire errors).
     assert!(matches!(
@@ -61,10 +72,14 @@ async fn fake_registry_serves_the_room_lifecycle() {
         Err(ResumeError::InvalidToken)
     ));
 
-    let joined = registry.join_room("TESTCODE1", "Guest").await.expect("join ok");
+    let joined = registry
+        .join_room("TESTCODE1", "Guest")
+        .await
+        .expect("join ok");
     assert_eq!(joined.credentials.color, PlayerColor::Black);
 
-    let resumed = registry.resume_room("TESTCODE1", &created.credentials.player_token)
+    let resumed = registry
+        .resume_room("TESTCODE1", &created.credentials.player_token)
         .await
         .expect("resume ok");
     assert_eq!(resumed.color, PlayerColor::White);
@@ -100,10 +115,22 @@ async fn fake_handle_records_commands_and_emits_events() {
         revision: 3,
     });
     let outcome = handle
-        .send(RoomCommand::Move { player: "host".into(), from: "d2".into(), to: "d4".into(), promotion: None, expected_revision: 3 })
+        .send(RoomCommand::Move {
+            player: "host".into(),
+            from: "d2".into(),
+            to: "d4".into(),
+            promotion: None,
+            expected_revision: 3,
+        })
         .await
         .expect("send ok");
-    assert!(matches!(outcome, CommandOutcome::Rejected { error: ErrorCode::NotYourTurn, .. }));
+    assert!(matches!(
+        outcome,
+        CommandOutcome::Rejected {
+            error: ErrorCode::NotYourTurn,
+            ..
+        }
+    ));
 
     // Events reach subscribers; MoveRejected is TARGETED (never broadcast).
     handle.emit(RoomEvent::to(
@@ -122,7 +149,11 @@ async fn fake_handle_records_commands_and_emits_events() {
     // A closed room rejects further commands.
     handle.close();
     assert!(matches!(
-        handle.send(RoomCommand::Leave { player: "host".into() }).await,
+        handle
+            .send(RoomCommand::Leave {
+                player: "host".into()
+            })
+            .await,
         Err(RoomClosed)
     ));
 }
@@ -131,7 +162,10 @@ async fn fake_handle_records_commands_and_emits_events() {
 /// works unchanged against fakes (tests) and B2's real registry (prod).
 #[tokio::test]
 async fn generic_code_works_against_any_registry() {
-    async fn create_and_subscribe<R: RoomRegistry>(registry: &R, nickname: &str) -> (R::Handle, bool) {
+    async fn create_and_subscribe<R: RoomRegistry>(
+        registry: &R,
+        nickname: &str,
+    ) -> (R::Handle, bool) {
         let created = registry.create_room(nickname).await.expect("create ok");
         let events = created.handle.subscribe();
         let alive = events.is_empty(); // receiver created, queue empty
@@ -141,6 +175,10 @@ async fn generic_code_works_against_any_registry() {
     let registry = FakeRegistry::new("TESTCODE1");
     let (handle, alive) = create_and_subscribe(&registry, "Host").await;
     assert!(alive);
-    let outcome = handle.send(RoomCommand::Leave { player: "host".into() }).await;
+    let outcome = handle
+        .send(RoomCommand::Leave {
+            player: "host".into(),
+        })
+        .await;
     assert!(outcome.is_ok());
 }

@@ -133,7 +133,11 @@ pub enum CommandOutcome {
     /// Accepted; the room revision AFTER this command.
     Accepted { revision: u64 },
     /// Rejected; B3 turns this into `server.error` / `game.move_rejected`.
-    Rejected { error: crate::protocol::ErrorCode, message: String, revision: u64 },
+    Rejected {
+        error: crate::protocol::ErrorCode,
+        message: String,
+        revision: u64,
+    },
 }
 
 /// One outbound room event. `target` selects the delivery route:
@@ -154,7 +158,10 @@ impl RoomEvent {
 
     /// Helper: event targeted at one player.
     pub fn to(player: PlayerId, kind: RoomEventKind) -> Self {
-        Self { target: Some(player), kind }
+        Self {
+            target: Some(player),
+            kind,
+        }
     }
 }
 

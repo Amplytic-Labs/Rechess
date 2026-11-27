@@ -9,8 +9,7 @@
  * (3) `docs/protocol-v1.md`. Never rename a field silently — the other side
  * compiles and breaks at runtime otherwise.
  *
- * The matching fixtures/tests live in `protocol.test.ts` (mirrors the Rust
- * `backend/tests/protocol_contract.rs`).
+ * The matching typed fixtures live in `protocol.fixtures.ts`.
  */
 
 export const PROTOCOL_VERSION = 1;

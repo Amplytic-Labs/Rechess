@@ -47,11 +47,6 @@ by design). CI (B4) runs the same.
 - No secrets in route params — room code at most; `player_token` never (F3 owns it in secure storage).
 - Docs: https://docs.expo.dev/router/introduction.md
 
-## Styling
-
-- NativeWind v4 (Tailwind 3 utilities) via `className` only — see RULES.md §1. Semantic tokens from `tailwind.config.js`; no arbitrary color values; dark mode works automatically through `src/theme/ThemeProvider.tsx`.
-- Animations with Reanimated 4.7 (babel preset already configured); never the legacy `Animated` API.
-
 ## Rules
 
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.

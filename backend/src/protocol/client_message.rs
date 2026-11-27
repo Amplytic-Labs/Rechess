@@ -80,7 +80,9 @@ pub enum ClientCommand {
     #[serde(rename = "game.rematch")]
     Rematch { expected_revision: u64 },
 
-    /// Leave the room explicitly.
+    /// Leave the room explicitly. Payload is an empty object `{}` on the wire
+    /// (struct variant — a unit variant would omit `payload` and reject
+    /// `"payload": {}`, which is what TS clients send).
     #[serde(rename = "room.leave")]
-    LeaveRoom,
+    LeaveRoom {},
 }

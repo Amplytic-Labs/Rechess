@@ -1,183 +1,180 @@
 # Module `network` — Owner: **B3** (WebSocket Server and Protocol)
 
 > **Read this file completely before writing any code.**
-> You also co-own `docs/protocol-v1.md` with F3 (frontend) — read that file
-> first, it is the single source of truth for the wire format.
+> This README is the index of the B3 onboarding doc set. The four numbered
+> files below are your working guide — read them in order.
 
 ---
 
-## 1. Your mission
+## Doc set index (read in this order)
 
-Deliver the transport layer: an Axum app with a health endpoint and a
-WebSocket endpoint, split each connection into a **reader task** (validate →
-route) and a **writer task** (drain a bounded outbound queue), and translate
-between the JSON wire protocol (v1) and B2's room API.
+| # | File | What it covers |
+|---|---|---|
+| — | `README.md` (this file) | Mission, boundaries, day-one quickstart |
+| 1 | [01-axum-websocket-guide.md](01-axum-websocket-guide.md) | The axum 0.8 WebSocket layer: route, upgrade, connection task, limits, heartbeat |
+| 2 | [02-protocol-implementation.md](02-protocol-implementation.md) | Per-command flows: parse gate, auth state machine, translation tables, outcome/event mapping, error mapping |
+| 3 | [03-testing.md](03-testing.md) | Two test layers (full code): serialization tests (run today) + two-client WS harness (needs your router) + websocat smoke test |
+| 4 | [04-acceptance.md](04-acceptance.md) | Definition of done, merge gate, handoff notes for F3 and B4 |
 
-You are **not** implementing chess rules (B1) or room state/lifecycle (B2).
-You route valid commands into B2's public actor interface; you never reach
-into B2's internal structs.
+The single source of truth for the **wire format** is
+[`docs/protocol-v1.md`](../../../docs/protocol-v1.md) — read it end to end
+before doc 02. The exact Rust types implementing it already exist and are
+frozen in [`src/protocol/`](../protocol/) — you consume them, you do not
+rewrite them.
 
-## 2. What you own / what you don't touch
+## Your mission
 
-| You own (`src/network/`) | You do NOT touch |
-|---|---|
-| Axum app, routes, WebSocket upgrade | `src/game/` (B1) |
-| Wire-format structs — put them in `src/protocol/` (see §5) | `src/rooms/` (B2) — call its public API only |
-| Message validation, limits, rate limiting | The room actor's internals |
-| Reader/writer connection tasks | The frontend protocol file — changes go through F3 + one PR (§5) |
-| Auth gate: token/seat association checks | |
-| Error payload mapping | |
-| `docs/protocol-v1.md` **jointly with F3** | |
-| Wire serialization tests | |
+You own the **transport**: everything between a raw TCP WebSocket connection
+and B2's room actors. Concretely:
 
-## 3. How your module fits the system
+1. **Axum router** — mount the WebSocket route (recommendation: `GET /ws`,
+   see doc 01 §1) in `network::router()`, merged into `build_router()` in
+   `src/lib.rs`; keep `GET /health` working.
+2. **WebSocket upgrade** — `WebSocketUpgrade` extractor, message-size limits,
+   `on_upgrade` into your per-connection task.
+3. **Per-connection task** — split the socket into
+   `(SplitSink, SplitStream)`, a bounded outbound channel, and one
+   `tokio::select!` loop over inbound frames vs outbound room events vs
+   heartbeat (doc 01 §4).
+4. **Envelope parse/serialize** — `serde_json::from_str::<ClientEnvelope>` /
+   `to_string(&ServerEnvelope)`, the version gate, malformed-input policy
+   (doc 02 §3).
+5. **Dispatch to B2's registry** — translate each `ClientCommand` into the
+   right `RoomRegistry` call or `RoomCommand` (doc 02 §5–§6), route every
+   `RoomEvent` back out as the right `ServerEvent` (doc 02 §7).
+6. **Auth gate** — a connection is UNBOUND until `room.create` /
+   `room.join` / `session.resume` succeeds; then it is BOUND to
+   `(room_code, player_id)` and may only act in its own room (doc 02 §4).
+7. **Limits** — max message size, allowed frame types, nickname validation,
+   rate limits, bounded outbound queue (doc 01 §6, doc 02 §3).
+8. **Heartbeat** — server Ping every 30 s, close after 2 missed Pongs,
+   notify B2 with `RoomCommand::Disconnected` (doc 01 §7).
 
-```
-client WS ──▶ reader task ──validate──▶ B2 RoomHandle.send(command)
-client WS ◀── writer task ◀── B2 outbound events (targeted + broadcast)
-```
+You deliver a **safe, typed, versioned pipe**. You are a courier, not a
+judge: chess rules belong to B1, room state and lifecycle to B2. The room
+actor is the authority on everything (revision, legality, seats, expiry);
+you only move typed bytes in and out of it.
 
-- B2's room actor serializes game changes; your tasks only move bytes.
-- B3 and F3 (frontend) freeze protocol v1 **on Day 1** — envelope, event
-  names, field names, revision semantics, reconnect flow — and record it in
-  `docs/protocol-v1.md`.
+## Boundaries
 
-## 4. Facts you need on Day 1 — axum 0.8 (already pinned in `Cargo.toml`)
+### You consume (never re-implement)
 
-Axum **0.8.9** is pinned with the `ws` feature. Key differences from older
-axum tutorials you will find online (verified Nov 2026):
+- [`src/rooms/contract.rs`](../rooms/contract.rs) — the traits `RoomRegistry`
+  (`create_room` / `join_room` / `resume_room` / `lookup`) and `RoomHandle`
+  (`send → CommandOutcome`, `subscribe → mpsc::Receiver<RoomEvent>`), plus
+  the `RoomCommand` / `RoomEvent` / error enums. Consume them **generically**
+  (`R: RoomRegistry`), exactly like `tests/testkit_demo.rs` does — code
+  written against the trait works unchanged against
+  `rooms::testkit::FakeRegistry` (your tests, today) and B2's real registry
+  (prod, when it lands).
+- [`src/protocol/`](../protocol/) — the ENTIRE wire layer you own at runtime:
+  `ClientEnvelope` / `ServerEnvelope` / `ClientCommand` / `ServerEvent` /
+  `ErrorCode` / `PROTOCOL_VERSION`, all already written, tested and frozen.
+- [`src/rooms/testkit.rs`](../rooms/testkit.rs) — `FakeRegistry` /
+  `FakeHandle` for your tests before B2's implementation lands.
+- `game` domain types appear in B2's contract (`RoomCommand::Move` uses
+  `game::Promotion`, `RoomEventKind::Finished` carries a `game::GameResult`)
+  — you convert between those and the wire types (doc 02 §7.3). You never
+  call B1's engine directly.
 
-- **Path parameters use `{param}` syntax**, not `:param`:
-  `.route("/room/{code}", get(...))`.
-- Text frames arrive as `Message::Text(Utf8Bytes)` (not `String`) in recent
-  versions — call `.as_str()` on it.
-- Split-socket pattern (reader and writer as two tasks over one mpsc):
+### You do NOT touch
 
-```rust
-use axum::{extract::ws::{Message, WebSocket, WebSocketUpgrade}, response::Response};
+- `src/game/` (B1) and `src/rooms/` (B2) — no edits, no reaching into room
+  internals. `RoomCommand`s are the only thing you put into B2's actor.
+- Chess rules, room lifecycle, expiry, rematch semantics.
+- `src/main.rs` config (RECHESS_HOST/PORT) beyond the one-line registry
+  wiring when B2 lands (doc 01 §2, coordinated with B4).
+- The frontend — except through the protocol change rule below.
 
-async fn ws_route(ws: WebSocketUpgrade) -> Response {
-    ws.on_upgrade(handle_socket)
-}
+### The protocol change rule (co-owned with F3)
 
-async fn handle_socket(socket: WebSocket) {
-    // Split into sender/receiver halves, give the sender half to a writer
-    // task that drains a BOUNDED mpsc of outbound events; read from the
-    // receiver half in this task; validate; route into B2's RoomHandle.
-    // On disconnect: tell B2 (so it can start the grace deadline) and abort
-    // the writer task.
-    todo!("your implementation — see the axum official websocket example")
-}
-```
+`src/protocol/` types are **frozen**. They are co-owned by B3 (Rust) and F3
+(TypeScript mirror in `frontend/src/types/protocol.ts`). Any change to a
+type, field name, or wire value must update **in the same reviewed PR**:
 
-Read the official axum WebSocket example (axum repo, `examples/websockets/`)
-before writing your own — the reader/writer split there is exactly the shape
-your brief requires. Use `tokio::select!` to interleave reading with writer
-lifecycle events; use `futures_util::StreamExt/SinkExt` (pinned in
-`Cargo.toml`) for the socket halves.
+1. `backend/src/protocol/` (the Rust types),
+2. `frontend/src/types/protocol.ts` (F3's mirror — F3 reviews),
+3. `docs/protocol-v1.md` (the spec).
 
-## 5. The wire-format structs: `src/protocol/` (yours)
+Never rename a field silently — the other side compiles and then breaks at
+runtime. If a change touches `rooms::contract` as well, B2 is in the PR too
+(per the change rule in `contract.rs`).
 
-The JSON contract is specified in **`docs/protocol-v1.md`** — it is the
-source of truth. You implement it as versioned Serde types in a sibling
-module `src/protocol/` (create it; it is part of your ownership):
+## Day-one quickstart
 
-```
-src/protocol/        ← create this (owner: B3)
-├── mod.rs           // re-exports, PROTOCOL_VERSION, shared enums (colors, statuses)
-├── envelope.rs      // ClientEnvelope / ServerEnvelope  { "v", "id", "type", "payload" }
-├── client_message.rs // ClientCommand enum (room.create/join, game.move, ...)
-├── server_message.rs // ServerEvent enum (room.created, game.state, ...)
-└── error_code.rs    // ErrorCode enum (ROOM_NOT_FOUND, ILLEGAL_MOVE, ...)
-```
+**1. Read, in this order** (all files are short — a focused afternoon):
 
-Suggested serde shape for the envelope (adjacently-tagged command flattened
-into the envelope — verify it round-trips with a unit test; if the flatten
-does not support this, hand-implement `Serialize`/`Deserialize` for the two
-envelope structs and keep the same JSON):
+1. `docs/protocol-v1.md` — the wire spec, end to end.
+2. This doc set: `01` → `02` → `03` → `04`.
+3. `backend/src/protocol/mod.rs` + the four files next to it — the types you
+   will serialize all day.
+4. `backend/src/rooms/contract.rs` (traits you consume) and
+   `backend/src/rooms/testkit.rs` (fakes you test against).
+5. `backend/tests/protocol_contract.rs` and `backend/tests/testkit_demo.rs`
+   — the two green test files your tests are modeled on.
 
-```rust
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct ClientEnvelope {
-    pub v: u32,
-    pub id: String,                        // unique command id (uuid) from the client
-    #[serde(flatten)]
-    pub command: ClientCommand,            // tag = "type", content = "payload"
-}
-```
-
-**Change rule:** any protocol change updates, in the *same* PR: (1) your
-Rust types, (2) `frontend/src/types/protocol.ts` (F3's file — F3 is
-co-reviewer), (3) `docs/protocol-v1.md`. Never rename a field silently —
-the other side compiles and breaks at runtime otherwise.
-
-## 6. Required behaviour (your brief, expanded)
-
-- Endpoints: keep `GET /health` from `src/main.rs`; add the WebSocket
-  endpoint (suggest `/ws`). Route registration stays in `src/main.rs` —
-  coordinate the one-line change with B4 (they own `main.rs` wiring for CI).
-- Reject unknown protocol versions (`v != 1`) and malformed payloads with a
-  structured `server.error` event — never drop the connection silently for
-  recoverable errors.
-- Route `room.create` / `room.join` to B2's registry; route in-room commands
-  to the correct `RoomHandle` by normalized room code.
-- **Auth gate:** player-specific commands are authenticated by the private
-  room token / seat association established via B2. A room code alone is
-  **not** authorization. Never trust client-claimed identity.
-- Enforce: max message size (commands are tiny — set `max_message_size` low,
-  e.g. a few KiB, on the upgrade builder), allowed message types, nickname
-  length (1–20 chars, no control chars), rate limits, bounded outbound queue.
-  Document every limit you choose in `docs/protocol-v1.md`.
-- Heartbeat/idle detection: WebSocket Ping/Pong from the server; close dead
-  connections and inform B2 so the grace deadline starts.
-- Duplicate command IDs / stale revisions: pass through to B2 (they own
-  dedup) and translate their typed errors into wire error codes.
-- Private credentials (`player_token`) are returned ONLY in the
-  `room.created`/`room.joined` response to the initiating connection.
-  Broadcasts carry public data only; logs never contain tokens.
-- Error payload: `{ "type": "server.error", "payload": { "error": "<CODE>", "message": "<safe text>" } }`
-  — safe client-facing message, details in `tracing` logs (no secrets).
-- Deployed environments terminate TLS at a reverse proxy and speak **WSS**
-  from the client — document the proxy requirements with B4.
-
-## 7. How to test your module independently
+**2. Toolchain + build + tests** (Rust is not on the default PATH here):
 
 ```bash
-cd backend
-cargo test network::    # unit tests live in your module
-cargo test protocol::    # serialization tests (same crate, your module)
+export PATH=/tmp/rust/cargo/bin:$PATH RUSTUP_HOME=/tmp/rust/rustup CARGO_HOME=/tmp/rust/cargo
+cd /home/z/my-project/Rechess/backend
+cargo build && cargo test
 ```
 
-Required test coverage (your brief):
+Expect GREEN: 15 tests across the `protocol` unit tests (4),
+`tests/protocol_contract.rs` (7) and `tests/testkit_demo.rs` (4). If this is
+not green before you start, stop and tell B4.
 
-1. Envelope round-trip tests for every command and event (serialize →
-   parse → equal). Include the exact examples from `docs/protocol-v1.md` as
-   fixtures — they are the frozen contract.
-2. Malformed payloads: invalid UTF-8 JSON, missing fields, wrong types,
-   unknown `type`, unknown `v` → each yields a structured error, no panic.
-3. **Two-client integration test** (write it with B4 — they own the harness
-   in `tests/`): connect two clients, create, join, move, both receive the
-   same revision; rejected move returns `game.move_rejected`; private
-   credentials never appear in broadcasts.
+**3. See the server run** (two terminals):
 
-For integration tests without real network, spawn the router with
-`Router::oneshot` / a real `TcpListener` on an ephemeral port
-(`tokio::net::TcpListener::bind("127.0.0.1:0")`) — B4's `tests/README.md`
-describes the setup.
+```bash
+# terminal 1 — start the server
+export PATH=/tmp/rust/cargo/bin:$PATH RUSTUP_HOME=/tmp/rust/rustup CARGO_HOME=/tmp/rust/cargo
+cd /home/z/my-project/Rechess/backend
+cargo run
 
-## 8. Deliverables (definition of done)
+# terminal 2 — the deployment health endpoint (B4's gate)
+curl http://127.0.0.1:3000/health
+# → {"status":"ok","service":"rechess-backend"}
+```
 
-- [ ] Axum WebSocket endpoint + health endpoint, reader/writer split, bounded outbound delivery
-- [ ] `src/protocol/` Serde types matching `docs/protocol-v1.md`, versioned
-- [ ] Auth gate, payload limits, rate limits, heartbeat handling
-- [ ] `docs/protocol-v1.md` frozen with F3 on Day 1, with examples and state diagrams
-- [ ] Serialization tests + two-client integration test (with B4)
-- [ ] This folder's README updated with your final route/module layout
+`src/main.rs` binds `RECHESS_HOST` (default `0.0.0.0`) and `PORT` (default
+`3000`) from the environment and serves `build_router()` from `src/lib.rs`.
+Today that router has only `/health` — your WS route is what goes in next.
 
-## 9. Key coordination
+**4. Then start implementing**: doc 01 gives the router/upgrade/connection
+skeleton; doc 02 the exact dispatch logic; doc 03 the tests you can write
+TODAY (`tests/network_protocol.rs` compiles against the frozen contracts
+before any of your code exists — start there).
 
-- **F3** (frontend) from Day 1: freeze the protocol together — you own the
-  Rust side, they own the TS side, the doc is shared.
-- **B2** daily: registry/handle API and the outbound event model.
-- **B4**: they build the integration harness; ask them for the two-client
-  test scaffold early instead of writing your own harness in duplicate.
+## Where your code goes
+
+```
+backend/src/network/
+├── README.md        ← this doc set (keep the index current)
+├── mod.rs           ← module re-exports + invariants note
+├── routes.rs        ← router() + ws upgrade handler + limits  (doc 01)
+├── connection.rs    ← per-connection task: select loop, writer task,
+│                      heartbeat, per-connection state           (doc 01 §4–§7)
+├── dispatcher.rs    ← parse gate, validation, translation, mapping (doc 02)
+└── limits.rs        ← every tunable constant in one place        (doc 01 §6)
+```
+
+(The brief's suggested layout had `websocket.rs` / `read_loop.rs` /
+`write_loop.rs` as separate files; this set consolidates them into
+`connection.rs` — the reader half is the select loop's inbound arm, the
+writer half is `writer_task`. Same responsibilities, fewer files. Adjust if
+you prefer; keep `limits.rs` constants in one place either way.)
+
+## Key coordination (from the brief, still true)
+
+- **F3** (frontend) — from Day 1: they implement the same protocol in
+  TypeScript; every protocol change is a joint PR (rule above). They are
+  your most important counterpart.
+- **B2** — daily: the `RoomRegistry`/`RoomHandle` surface, the outbound
+  event model, and the **two open decisions** flagged in doc 02 §5.3
+  (command-id dedup location) and §7.4 (single-channel rejection
+  agreement). Settle both on Day 1.
+- **B4** — they own `backend/tests/` and CI; coordinate file placement of
+  `tests/network_protocol.rs` / `tests/network_ws.rs` and the
+  `tokio-tungstenite` dev-dependency PR (doc 03 §3).

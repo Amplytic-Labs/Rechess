@@ -1,181 +1,130 @@
 # `src/services/` — Owner: **F3** (WebSocket Client and Frontend State)
 
 > **Read `frontend/RULES.md` first** — it is binding. Then read this file
-> completely. You also co-own `docs/protocol-v1.md` (at the repo root) with
-> B3 — review it before anything else; it is the wire contract.
+> completely before writing any code. You also co-own
+> `docs/protocol-v1.md` (repo root) with B3 — it is the wire contract and
+> the source of truth for every type you will touch.
+
+This README is the **index of your doc set**. Each doc answers one part of
+your brief; read them in order the first time:
+
+| Doc | What it covers |
+|---|---|
+| `01-protocol-types.md` | Owning `src/types/protocol.ts`: what already exists, the binding change rule, how to extend types safely, how the fixtures file is used |
+| `02-websocket-service.md` | The single WebSocket client (`src/services/websocket.ts`): URL derivation, send/receive paths, lifecycle state machine, reconnect + resume, heartbeat |
+| `03-stores-and-hooks.md` | The zustand stores (`src/store/`) and the public hooks (`src/hooks/`) screens consume, including the frozen hook/action names |
+| `04-security.md` | `player_token` handling with `expo-secure-store` |
+| `05-manual-testing.md` | How to verify your work with NO test runner: typecheck, real-backend scenarios, and a dev-only mock strategy |
 
 ---
 
 ## 1. Your mission
 
-Deliver the **single typed WebSocket connection** to the backend, the
-application stores (zustand), the protocol TypeScript types, and secure
-token storage. Every other frontend module consumes your typed API — you
-are the bridge between the backend protocol and all UI contributors.
+Deliver four things, in this order of dependency:
 
-You are **not** building screens (F1/F4) or board components (F2).
+1. **The single typed WebSocket connection** to the backend — exactly ONE
+   connection per app, owned by one module-level service
+   (`src/services/websocket.ts`, doc 02). Screens never open sockets.
+2. **The zustand stores** (`src/store/`): connection status, room state,
+   and the authoritative game snapshot with revision guarding
+   (doc 03).
+3. **The public typed hooks** (`src/hooks/`) that F1 (lobby) and F4 (game
+   screen) call to read state and send commands (doc 03).
+4. **Token security** (`src/security/`): the `player_token` lives ONLY in
+   `expo-secure-store` (doc 04).
 
-## 2. What you own / what you don't touch
+Plus **ownership of the protocol types**: `src/types/protocol.ts` already
+exists and is complete (doc 01). You own keeping it in sync with the
+backend and `docs/protocol-v1.md`.
 
-| You own | You do NOT touch |
-|---|---|
-| `src/services/**` (WebSocket service) | `src/screens/**` (F1/F4) |
-| `src/store/**` (zustand stores) | `src/components/chess/` (F2) |
-| `src/types/protocol.ts` (TS mirror of the protocol; B3 owns the Rust side) | `src/app/` routes (F1/F4 own their route files) |
-| `src/security/**` (token storage) | The server side of the protocol (B3) |
-| `src/hooks/**` (the public typed hooks F1/F2/F4 consume) | |
+## 2. Ownership map
 
-**Change rule for the protocol:** any change updates, in the same PR: your
-`src/types/protocol.ts`, B3's `backend/src/protocol/`, and
-`docs/protocol-v1.md`. Never rename a field silently.
+| Path | Yours | What goes there |
+|---|---|---|
+| `src/services/**` | ✔ | `websocket.ts` — the WS client (module-level singleton, not a hook) |
+| `src/store/**` | ✔ | `connection-store.ts`, `room-store.ts`, `game-store.ts` |
+| `src/types/protocol.ts` (+ `protocol.fixtures.ts`) | ✔ | The TS mirror of the wire contract |
+| `src/security/**` | ✔ | SecureStore wrapper for `player_token` |
+| `src/hooks/**` | ✔ | `useConnection`, `useRoomState`, `useGameState`, `useRoomActions` — the public API |
 
-## 3. The base that already exists (don't rebuild it)
+> Note: `RULES.md` §0 lists `src/services/`, `src/store/`, `src/types/`,
+> `src/security/` under F3; the `frontend/README.md` module map also lists
+> `src/hooks/` under F3. If you want this formalized in `RULES.md` §0,
+> propose a tiny doc PR — do not edit `RULES.md` yourself.
 
-- `zustand ~5.1.0` (state), `expo-secure-store ~58.0.3` (token storage),
-  `expo-crypto ~58.0.9` (UUIDs) — installed and SDK-matched.
-- No socket library is needed and none is installed: React Native ships a
-  global `WebSocket` class — use it directly (see §5).
-- The React Native `WebSocket` API is callback-based (`onopen`, `onmessage`,
-  `onclose`, `onerror`, `close()`, `send(string)`).
+Everything else is someone else's: `src/screens/lobby/` (F1),
+`src/components/chess/` (F2), `src/screens/game/` (F4), routes, theme,
+configs. Cross-folder changes go through a short PR the owner approves.
 
-## 4. Protocol types — `src/types/protocol.ts`
+## 3. Boundaries — you are not the UI
 
-Implement the TS mirror of `docs/protocol-v1.md` (it's the source of truth;
-B3's Rust structs mirror it too). Shape:
+- **You never render.** No JSX, no components, no screens in your folders.
+  Your code produces typed state and typed actions; F1/F4 produce pixels.
+- **Hooks expose data + actions, nothing else.** A hook returns state
+  slices (from your stores) and command senders (through your service).
+  Screens subscribe with narrow selectors and call actions — they never
+  see the socket, the envelope, or the token.
+- **F2 is pure props.** F2's `ChessBoard` receives `fen`, `legalMoves`,
+  orientation and an `onMove` callback from F4; it does not consume your
+  hooks directly. Do not add imports of `@/hooks` or `@/store` into
+  `src/components/chess/`.
+- **The server is authoritative.** You never compute FEN, legal moves,
+  or results client-side, and you never optimistically apply a move
+  (RULES.md §4, doc 03).
 
-```ts
-export const PROTOCOL_VERSION = 1;
+## 4. Definition of done
 
-// Client → server: discriminated union on `type`, flattened into the envelope
-export type ClientEnvelope = { v: number; id: string } & ClientCommand;
+- [ ] `protocol.ts` stays in sync: every change updates B3's
+      `backend/src/protocol/` and `docs/protocol-v1.md` in the **same** PR.
+- [ ] One WS service: connect / send / subscribe / disconnect; unique
+      command ids (`expo-crypto` `randomUUID()`); generation guard against
+      stale sockets.
+- [ ] Reconnect: exponential backoff with jitter (capped), automatic
+      `session.resume` from SecureStore, `session.ready` snapshot applied
+      atomically, `INVALID_TOKEN` clears credentials.
+- [ ] Three stores with the atomic-revision rule and the pending-move
+      pattern (doc 03).
+- [ ] Hooks `useConnection` / `useRoomState` / `useGameState` /
+      `useRoomActions` — the names F1/F4's READMEs already reference.
+- [ ] `player_token` only ever in SecureStore (doc 04); never in logs,
+      route params, stores, or fixtures shipped to production.
+- [ ] `npm run typecheck` and `npm run lint` pass, and every scenario in
+      `05-manual-testing.md` has been walked through on a device/simulator
+      with the real backend at least once.
 
-export type ClientCommand =
-  | { type: "room.create"; payload: { nickname: string } }
-  | { type: "room.join"; payload: { room_code: string; nickname: string } }
-  // …every command from docs/protocol-v1.md §3
-  ;
-
-export type ServerEnvelope = { v: number; revision?: number } & ServerEvent;
-
-export type ServerEvent =
-  | { type: "room.created"; payload: { room_code: string; player_id: string;
-      player_token: string; color: PlayerColor; room: RoomPublicState } }
-  // …every event from docs/protocol-v1.md §4
-  ;
-
-export type ErrorCode = "ROOM_NOT_FOUND" | "ROOM_FULL" | "ROOM_EXPIRED" |
-  "INVALID_TOKEN" | "NOT_YOUR_TURN" | "ILLEGAL_MOVE" | "STALE_REVISION" |
-  "GAME_FINISHED" | "INVALID_PAYLOAD" | "UNSUPPORTED_VERSION" |
-  "RATE_LIMITED" | "INTERNAL";
-
-export type GameSnapshot = { /* fen, turn, game_status, result, legal_moves,
-  move_history, players, draw_offer, room_code, status — exact §4.3 */ };
-```
-
-Add a small **decoder** (`parseServerEnvelope(raw: string): ServerEnvelope | null`)
-so malformed server data is dropped in ONE place instead of crashing screens.
-
-## 5. WebSocket service — `src/services/ws-service.ts`
-
-One connection per app, owned by a module-level service (not by screens):
-
-```ts
-// Sketch — implement it your way, keep the responsibilities:
-export const wsService = {
-  connect(url: string): void;            // ws:// dev, wss:// prod (no trailing logic in screens)
-  send(command: ClientCommand): void;    // adds v, unique id (expo-crypto randomUUID), enqueue-or-fail
-  onEvent(handler: (e: ServerEvent) => void): () => void;  // unsubscribe fn
-  disconnect(): void;
-};
-
-// Reconnect with capped exponential backoff + jitter (e.g. 0.5s → 30s, ±30%);
-// stop retrying when the room is finished/expired or the user leaves.
-```
-
-Rules:
-- Unique command IDs via `expo-crypto`'s `randomUUID()`.
-- You own `expected_revision`: read the store's current revision when
-  sending a state-changing command.
-- Buffer/reject sends while disconnected — surface connection state in the
-  store, never leave a "silent dead" UI.
-- On `onclose` (not user-initiated) or app foregrounding (AppState →
-  "active"), attempt resume: `session.resume` with the stored token, then
-  **replace** the whole local state with the `session.ready` snapshot.
-- Stale socket callbacks must never overwrite newer state — guard by
-  connection/generation counter.
-- `player_token` goes ONLY to `expo-secure-store` (via `src/security/`),
-  never in logs, route params, or normal persisted state. Clear it when the
-  player leaves or the room expires.
-
-## 6. Stores — `src/store/`
-
-zustand, one store per domain; screens subscribe with **narrow selectors**
-(`useRoomStore((s) => s.status)`), not whole-store reads:
-
-```ts
-// src/store/connection-store.ts — connecting|connected|reconnecting|disconnected
-// src/store/room-store.ts       — roomCode, players, status, drawOffer, revision
-// src/store/game-store.ts       — the CURRENT snapshot applied atomically:
-//                                  { revision, fen, turn, gameStatus, result,
-//                                    lastMove, moveHistory, legalMoves, pending }
-// src/store/session-store.ts    — yourColor, playerId (NOT the token — that's secure storage)
-```
-
-Store rules (from the master plan):
-
-- Apply a snapshot **atomically** (one `set()` — FEN + turn + revision
-  together, never separate async steps). Ignore snapshots with
-  `revision <=` the applied one. If revisions skip, the next full snapshot
-  still wins — don't assume every intermediate event arrives.
-- Never optimistically apply your own move: set `pending: true`, wait for
-  `game.state`. On `game.move_rejected`: clear pending, show the safe error,
-  apply the newer snapshot if the server included one.
-- Connection status stays separate from game status: disconnected ≠ finished.
-- One in-flight command per action: ignore duplicate taps of move/resign
-  buttons while `pending`.
-
-## 7. Public hooks — `src/hooks/` (your API to F1/F2/F4)
-
-Freeze these names with F1/F4 on Day 1 (proposed):
-
-```ts
-useRoomActions()  // createRoom, joinRoom, resumeRoom, leaveRoom, sendMove,
-                 // offerDraw, acceptDraw, resign, rematch — each sets loading/error
-useRoomState()    // roomCode, players, status, drawOffer, yourColor
-useGameState()    // the snapshot + pending
-useConnection()   // connection state for banners/disabled states
-```
-
-## 8. How to test your module independently
+## 5. Quickstart
 
 ```bash
 cd frontend
-npm run typecheck && npm run lint
-npx jest --testPathPattern="(ws|store|types)"
+npm install            # once — deps are committed in package-lock.json
+npm run typecheck      # tsc --noEmit — must be zero errors, always
+npm run lint           # eslint — must be zero errors/warnings
 ```
 
-- Unit tests: envelope encode/decode round-trips against the JSON examples
-  in `docs/protocol-v1.md` (they are fixtures — paste them verbatim);
-  malformed payload handling; revision guard (older snapshot ignored);
-  pending clear on rejection; token never in any store snapshot
-  (assert serialize(store) contains no token).
-- Mock `global.WebSocket` in jest (a tiny fake with `send` capture and
-  event triggering) to test connect/backoff/resume logic without a server.
-- On Day 3–4 wire it to B3's real server for the two-device vertical slice.
+Then:
 
-## 9. Deliverables (definition of done)
+1. Read `01-protocol-types.md` (short — the types already exist).
+2. Read `02-websocket-service.md` and write `src/services/websocket.ts`.
+3. Read `03-stores-and-hooks.md` and write the stores, then the hooks.
+4. Read `04-security.md` and wire the token flow.
+5. Read `05-manual-testing.md` and run the scenarios against
+   `cargo run` in `backend/` (server listens on `0.0.0.0:3000` by
+   default; health check: `curl http://localhost:3000/health`).
 
-- [ ] `src/types/protocol.ts` matching `docs/protocol-v1.md` + decoder
-- [ ] Single-connection WebSocket service with backoff+jitter reconnect + resume
-- [ ] zustand stores with atomic snapshot application + revision guards
-- [ ] `expo-secure-store` token handling (set/get/clear, never logged)
-- [ ] The four hooks, typed, with loading/error states
-- [ ] Unit tests (§8) — protocol fixtures, store guards, WS fake
-- [ ] Error-code → user-message map table in this README (update §9)
+Point the app at the backend: set `EXPO_PUBLIC_API_URL` in `.env`
+(doc 02 §2) — e.g. `http://192.168.1.20:3000` (your machine's LAN IP).
 
-## 10. Key coordination
+## 6. Key coordination
 
-- **B3** from Day 1: freeze `docs/protocol-v1.md` together.
-- **F1** (create/join flows), **F2** (snapshot fields), **F4** (game screen):
-  publish the hook names early; changes via PR.
-- **B4**: end-to-end tests use your connection states — keep them observable.
+- **B3** (backend transport): your mirror counterpart. Every protocol
+  change is a joint PR. Read B3's `backend/src/network/01-…` and
+  `02-…` docs — your client must match their lifecycle (heartbeat,
+  auth state machine, limits).
+- **B2** (rooms): owns token verification, reconnect grace, room
+  retention — the server-side half of doc 04.
+- **F1** (lobby): consumes `useRoomActions().createRoom/joinRoom` and
+  `useRoomState()` (their README §6 pins these names).
+- **F4** (game screen): consumes `useGameState()`, `useRoomState()`,
+  `useRoomActions()`, `useConnection()` (their README §3 pins these).
+- **B4** (CI/deployment): runs the same typecheck/lint gates; keep your
+  connection states observable for their end-to-end tests.

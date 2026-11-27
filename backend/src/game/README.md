@@ -1,4 +1,4 @@
-# Module `game` — Owner: **B1** (Chess Engine and Game Logic)
+# Module `game` — onboarding doc set for **B1** (Chess Engine and Game Logic)
 
 > **Read this file completely before writing any code.**
 > It tells you what you are expected to do, how to do it, what the result must
@@ -18,191 +18,124 @@ You are **not** building WebSockets, rooms, or anything network-related. Those
 belong to B2 (rooms) and B3 (network). Your module must be usable by B2 with
 no dependency on Axum, sockets, or frontend code.
 
-## 2. What you own / what you don't touch
+The public API you must implement is **already frozen** in
+[`contract.rs`](contract.rs) — read [`01-contract.md`](01-contract.md) for the
+piece-by-piece explanation, [`02-implementation-guide.md`](02-implementation-guide.md)
+for the how (shakmaty 0.30.3), [`03-testing.md`](03-testing.md) for the test
+suite you ship, and [`04-acceptance.md`](04-acceptance.md) for the definition
+of done and the handoff to B2.
 
-| You own (`src/game/`) | You do NOT touch |
+## 2. Doc set index
+
+| File | What it is |
 |---|---|
-| The chess rules wrapper around the `shakmaty` crate | `src/rooms/` (B2) |
-| Move validation and application | `src/network/` (B3) |
-| FEN / SAN / move history / snapshots | `src/main.rs` (only if B3 asks you to expose something) |
-| Check, checkmate, stalemate, draw detection | `frontend/` (F-team) |
-| Unit tests for chess rules | Wire-format types (`protocol` structs live with B3, see §7) |
+| [`README.md`](README.md) | This file: mission, boundaries, change rule, day-one quickstart. |
+| [`01-contract.md`](01-contract.md) | The frozen contract explained: every type in `contract.rs`, every trait method's exact behavior (validation order, edge cases), every `GameError`, how B2 consumes the engine, constructor conventions. |
+| [`02-implementation-guide.md`](02-implementation-guide.md) | HOW to implement it with shakmaty 0.30.3: file layout, move lookup, the SAN-before-`play()` ordering pitfall, zobrist hashing for threefold repetition, fifty-move clock, snapshot assembly, a skeleton with TODO markers, and the verified FEN/SAN fixtures. |
+| [`03-testing.md`](03-testing.md) | The complete test suite you ship (unit + integration test code that compiles against the real contract), and the run commands. **These tests cannot exist yet — read the note at its top.** |
+| [`04-acceptance.md`](04-acceptance.md) | Definition-of-done checklist mapped to your assignment brief, the merge-gate commands, and the handoff checklist for B2. |
 
-If a change you need seems to require touching another module, talk to that
-module's owner first — do not edit their files.
+Existing source files in this folder:
 
-## 3. How your module fits the system
+| File | Role |
+|---|---|
+| [`contract.rs`](contract.rs) | The FROZEN public API: domain types + the `ChessEngine` trait. **You implement against it; you do not change it without a B1+B2 PR.** |
+| [`testkit.rs`](testkit.rs) | `FakeEngine` + fixtures so B2/B3/B4 can test against the contract before your real engine lands. **Shared — not your deliverable; do not edit without a PR.** |
+| [`mod.rs`](mod.rs) | Module wiring (`pub mod contract; pub mod testkit; pub use contract::*;`). You extend it with `pub mod engine;` (and a re-export) when your engine lands. |
 
-```
-client move ──▶ B3 network ──▶ B2 room actor ──▶ B1 ChessEngine
-                                                │ validates + applies
-              broadcast snapshot ◀── B2 ◀────────┘ GameSnapshot (game:: types)
-```
+## 3. What you own / what you don't touch
 
-- B2's room actor calls your engine **sequentially** from a single task — you
-  never need internal locking (no `Mutex` around the board).
-- B3 maps your engine output into the wire JSON (see `docs/protocol-v1.md`).
-  You never serialize anything yourself unless B3 asks for a helper.
+| You own (inside `backend/src/game/`) | You do NOT touch |
+|---|---|
+| `engine.rs` — the shakmaty-backed engine implementing the `ChessEngine` trait | `src/protocol/` (B3 + F3) and `docs/protocol-v1.md` |
+| Any helper modules you add inside `src/game/` (e.g. `history.rs`) — keep them `pub(crate)`/private unless B2 needs them | `src/rooms/` (B2), `src/network/` (B3) |
+| The module wiring in `mod.rs` (adding `pub mod engine;` + re-export of your concrete type) | `src/main.rs`, `src/lib.rs` (only via a PR if B3 asks you to expose something) |
+| Your unit tests (`#[cfg(test)] mod tests` inside `engine.rs`) and `backend/tests/game_engine.rs` | `testkit.rs` — shared with B2/B3/B4; changes need a PR |
+| The docs in this folder (this set) | `frontend/` (F-team), `backend/tests/testkit_demo.rs` (B4's example) |
 
-## 4. Facts you need on Day 1 — the `shakmaty` crate
+Rules of thumb:
 
-The crate is already pinned in `backend/Cargo.toml`: **`shakmaty = "0.30.3"`**
-(released Nov 2026, actively maintained, it is the Lichess rules library).
-Your first job is a **proof of concept** that confirms the facts below on your
-machine — never trust a wrapper doc blindly, including this one.
+- Your public surface is `contract.rs` **plus** your constructor(s)
+  (`new_game()`, see `01-contract.md` §6). Everything else stays private.
+- Keep every `shakmaty` type inside `src/game/`. B2 must compile against your
+  API without knowing shakmaty exists.
+- If a change you need seems to require touching another module, talk to that
+  module's owner first — do not edit their files.
 
-> ⚠️ **License note:** `shakmaty` is **GPL-3.0-or-later**. For a university
-> assignment this is normally fine (you distribute source). If the team needs a
-> permissive license instead, raise it on Day 1 and swap to `cozy-chess` (MIT,
-> but fewer features — you would write more SAN/FEN code yourself). Decision
-> belongs to the whole team, before you build on it.
+## 4. The change rule (contract is frozen)
 
-Key API surface (verify each with a tiny test):
+`contract.rs` is the frozen interface between you (B1) and B2. **Any signature
+or semantic change to it is a PR agreed by B1 + B2** (B3 only if the wire
+mirror in `src/protocol/` is affected — see the header comment of
+`contract.rs`). Until such a PR exists, implement exactly what
+[`01-contract.md`](01-contract.md) documents. Open points where the frozen
+contract is ambiguous are listed in `01-contract.md` §7 — resolve them with B2
+in a PR, do not silently pick a behavior that a room-actor test could depend
+on.
 
-```rust
-use shakmaty::{Chess, Move, Square, fen::Fen, san::San, uci::Uci, CastlingMode};
+## 5. Testing (pointer)
 
-let mut pos = Chess::default();                          // initial position
-let from: Square = "e2".parse().unwrap();
-let to: Square = "e4".parse().unwrap();
-
-// Legal moves (20 in the initial position). Move is an enum:
-//   Normal { role, from, capture, to, promotion } | EnPassant { from, to } | Castle { king, rook }
-let moves = pos.legal_moves();
-let m = moves.iter().find(|m| m.from() == Some(from) && m.to() == Some(to)).unwrap();
-
-// SAN — generate BEFORE playing the move (needs the pre-move position for disambiguation)
-let san = San::from_move(&pos, m).to_string();            // "e4"
-
-// FEN
-let fen = Fen::from_position(&pos, shakmaty::EnPassantMode::Legal).to_string();
-
-// State transitions — play() takes the position BY VALUE
-let next = pos.play(m).unwrap();                         // Result<Chess, PlayError>
-
-// Game status
-pos.is_check(); pos.is_checkmate(); pos.is_stalemate();
-pos.is_insufficient_material(); pos.halfmoves();          // fifty-move counter
-
-// Parse a FEN back into a position (useful for tests)
-let pos2: Chess = "rnbqkbnr/... b KQkq - 0 1".parse::<Fen>().unwrap()
-    .into_position(CastlingMode::Standard).unwrap();
-```
-
-**What `shakmaty` does NOT do** (you must build this yourself in the app layer):
-
-- Threefold-repetition tracking → keep a `Vec<`zobrist hash`>` history and count
-  occurrences (`pos.zobrist_hash()`).
-- The fifty-move draw rule → check `pos.halfmoves() >= 100`.
-- Draw offers / acceptance, resignation, rematch reset — these are
-  multiplayer lifecycle operations, not board moves.
-
-## 5. Your interface contract with B2
-
-This is the **proposed** public API. Finalize it with B2 **on Day 1** (post your
-structs in the team chat / a PR). Once agreed, treat it as frozen: B2 builds
-against it.
-
-```rust
-// src/game/engine.rs — proposed shape (implement it yourself)
-
-pub struct ChessEngine { /* position, history, draw-offer state, ... */ }
-
-impl ChessEngine {
-    pub fn new_game() -> Self;
-    /// Apply a move: from/to squares like "e2"/"e4", optional promotion 'q'|'r'|'b'|'n'.
-    pub fn apply_move(&mut self, from: &str, to: &str, promotion: Option<char>) -> Result<GameSnapshot, GameError>;
-    pub fn offer_draw(&mut self, by: Side) -> Result<GameSnapshot, GameError>;
-    pub fn accept_draw(&mut self, by: Side) -> Result<GameSnapshot, GameError>;
-    pub fn resign(&mut self, by: Side) -> Result<GameSnapshot, GameError>;
-    pub fn reset_for_rematch(&mut self);                  // new board, cleared history
-    pub fn snapshot(&self) -> GameSnapshot;               // current state, no mutation
-}
-
-pub struct GameSnapshot { /* your design: fen, turn, status, last_move, san_history, legal_moves, ... */ }
-pub enum GameError { IllegalMove, WrongTurn, NotPromotionSquare, UnknownPromotion, InvalidSquare(String), GameAlreadyOver, /* ... */ }
-```
-
-Rules for this contract:
-
-- Inputs are **strings from the wire** (`from`, `to`, promotion letters) — you
-  validate square syntax and promotion values and return typed errors; never
-  panic on bad input.
-- `legal_moves` uses UCI-style encoding (`"e2e4"`, `"e7e8q"`) so the frontend
-  can highlight destinations — coordinate with B3/F2 on the encoding (see
-  `docs/protocol-v1.md` §4.2).
-- Keep `shakmaty` types **inside** this module. B2 must be able to compile
-  against your public API without knowing shakmaty exists (only re-export
-  simple types like a `Side` enum you define).
-- Room revision, player credentials, connection state: **not yours** — never
-  add them to the engine.
-
-## 6. Suggested module layout (yours to adjust)
-
-```
-src/game/
-├── mod.rs        // pub mod engine; pub mod snapshot; ... — re-exports the public API
-├── engine.rs     // ChessEngine: validation, apply, lifecycle actions
-├── snapshot.rs   // GameSnapshot + status/result types
-├── errors.rs     // GameError (typed, stable)
-└── tests.rs      // or #[cfg(test)] mod tests in each file
-```
-
-## 7. How to test your module independently
-
-You do **not** need the server, rooms, or sockets. Unit tests only:
+The full test suite you ship — code, expected values, run commands — lives in
+[`03-testing.md`](03-testing.md). Quick reference:
 
 ```bash
-cd backend
-cargo test game::            # run only your module's tests
-cargo test game::tests::promotion    # a single test
+cargo test game::              # unit tests inside src/game/
+cargo test --test game_engine  # the engine integration suite
+cargo test                     # everything — must stay green
 ```
 
-Your test suite must cover (from your brief):
+(`testkit.rs`'s header comment refers to "README §Testing" — this is that
+section; the contract tests B2/B3/B4 run against the fake are in
+`backend/tests/testkit_demo.rs`, and your real engine must satisfy the same
+contract.)
 
-1. Initial position: 20 legal moves; first move `e2-e4` yields the expected FEN.
-2. Special moves: castling (both sides, incl. castling-through-check denial),
-   en passant (incl. the one-move expiry window), all four promotion choices.
-3. Check, checkmate (e.g. fool's mate), stalemate, insufficient material.
-4. Wrong-turn moves, illegal moves, moves after game over, invalid square
-   strings, promotion given on a non-promotion move → each returns the right
-   `GameError` variant.
-5. Draw lifecycle: offer → accept ends the game; resign ends it; rematch
-   reset returns an initial snapshot.
+## 6. Definition of done (summary)
 
-Use FEN fixtures as the source of truth for positions (write them as consts
-in the test module). Keep tests deterministic; B4 will turn some of them into
-cross-module regression tests later.
+You are done when (full checklist and merge-gate commands in
+[`04-acceptance.md`](04-acceptance.md)):
 
-## 8. Integration sequence (from the master plan)
+- [ ] `ShakmatyEngine` (or your concrete type) implements `ChessEngine`, plus
+      an inherent `new_game()` constructor (and the `new_engine() ->
+      Box<dyn ChessEngine>` factory helper if B2 asked for one).
+- [ ] Every test in [`03-testing.md`](03-testing.md) is green
+      (`cargo test game::` and `cargo test --test game_engine`), plus the whole
+      existing suite (`cargo test`) stays green.
+- [ ] `cargo build`, `cargo test`, `cargo fmt --check`, `cargo clippy` are clean.
+- [ ] Your PR touches only files inside `backend/src/game/` (plus
+      `backend/tests/game_engine.rs`).
+- [ ] B2 can construct a game, apply moves and read snapshots purely through
+      the contract — no reverse-engineering needed.
 
-| Day | Milestone |
-|---|---|
-| 1 | PoC that `shakmaty` parses the initial position + enumerates/applies legal moves; publish your proposed public structs and error cases to B2 |
-| 2 | Engine skeleton + basic move tests merged |
-| 3–4 | First vertical slice: new game, apply e2-e4, return snapshot |
-| 5–6 | Edge-case rules, terminal states, draw/resign behaviour |
-| 7–8 | Fix integration defects found in room/WS tests |
-| 9–10 | Support B4's regression suite; record crate version + limitations in this README (§9) |
+## 7. Day one quickstart
 
-The vertical slice on Day 3–4 is the key coordination point: B2 needs only
-`new_game()`, `apply_move()` and `snapshot()` to demonstrate an end-to-end
-move with B3 and the frontend.
+Read order:
 
-## 9. Deliverables (definition of done)
+1. This file.
+2. [`contract.rs`](contract.rs) — the real types, line by line (15 minutes
+   well spent; everything else refers back to it).
+3. [`01-contract.md`](01-contract.md) — what each piece means, exactly.
+4. [`02-implementation-guide.md`](02-implementation-guide.md) — how to build
+   it with shakmaty 0.30.3 (includes the verified shakmaty API facts and the
+   fixture FENs).
+5. [`03-testing.md`](03-testing.md) — the tests you will ship; start them as
+   soon as the skeleton compiles (TDD works well here).
+6. [`04-acceptance.md`](04-acceptance.md) — pin the finish line on the wall.
+7. Skim `backend/tests/testkit_demo.rs` — the import style your integration
+   tests copy.
+8. Skim `src/rooms/contract.rs` — only to see how B2 calls an engine (you
+   implement the trait, you never import `rooms`).
 
-- [ ] Compiling `game` module with a small, stable public API usable by B2
-- [ ] Unit tests for standard movement and all special rules (§7)
-- [ ] Typed error model (`GameError`) — no panics, no stringly-typed errors
-- [ ] Snapshot containing: FEN, side to move, game status, last move, SAN history, legal moves
-- [ ] A short usage example in this README's place (update §5 with the final signatures)
-- [ ] A note recording the exact `shakmaty` version used and which rules you
-      implemented yourself (repetition, fifty-move, draw/resign lifecycle)
+Verify the base compiles before you start (Rust toolchain first, then cargo
+commands from `backend/`):
 
-## 10. Key coordination
+```bash
+export PATH=/tmp/rust/cargo/bin:$PATH RUSTUP_HOME=/tmp/rust/rustup CARGO_HOME=/tmp/rust/cargo
+cd /home/z/my-project/Rechess/backend
+cargo build && cargo test
+```
 
-- **B2** is your daily contact — the engine/room boundary.
-- **B3** owns the wire JSON; when your snapshot fields are mapped to protocol
-  messages, agree names with B3, but B3 owns `docs/protocol-v1.md`.
-- Raise any limitation you find in `shakmaty` **immediately** — never silently
-  approximate a chess rule.
+Expected baseline at the time this doc set was written: **build succeeds and
+`cargo test` is green with 15 tests** (protocol round-trips + testkit fakes).
+There is no engine yet — the game module currently contains only the frozen
+contract, the testkit fake, and this documentation. That is the state you take
+over from.

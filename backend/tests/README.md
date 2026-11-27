@@ -1,168 +1,140 @@
-# `backend/tests/` — Owner: **B4** (Backend QA, Integration and Deployment)
+# `backend/tests/` — B4 doc set: QA, integration, CI & deployment
 
+> **Owner: B4 — Backend QA, Integration and Deployment.**
 > You are the backend integration and quality owner, involved **from Day 1**,
 > not after feature development ends. Feature owners (B1/B2/B3) write their own
 > unit tests; you own cross-module tests, CI, deployment and measurement.
+> **You are the merge authority: no module PR merges until you have verified it
+> yourself.**
 
 ---
 
-## 1. What this folder is for
+## 1. Mission
 
-Rust integration tests: each `.rs` file here is compiled as a separate test
-binary against the crate. You own this folder. Feature owners must not add
-their cross-module tests here without coordinating with you — their module
-unit tests live in their own `src/*/` folders.
+Prove that the backend built by B1 (game engine), B2 (rooms) and B3 (network)
+works as one system, can be deployed reproducibly, and behaves predictably
+under multiple simultaneous rooms and network failures. Concretely you own:
 
-Nothing has been created here yet on purpose — the harness below is yours to
-build. The rest of this file is the plan for how.
+| Area | What it means | Doc |
+|---|---|---|
+| Quality gates | `cargo build` / `test` / `fmt` / `clippy` policies, run identically locally and in CI | [01-merge-gates.md](01-merge-gates.md) |
+| Per-module merge verification | You re-verify every B1/B2/B3 PR **independently** before merge | [01-merge-gates.md](01-merge-gates.md) |
+| Integration suite | End-to-end scenarios (happy path, races, reconnect, expiry) against the frozen contracts | [02-integration-suite.md](02-integration-suite.md) |
+| CI | The backend GitHub Actions workflow (and later the frontend job) | [03-ci-workflow.md](03-ci-workflow.md) |
+| Deployment | Dockerfile, env vars, WSS reverse proxy, health checks, runbook, rollback | [04-deployment.md](04-deployment.md) |
+| Performance | The 50-room / 100-player benchmark workload, measured and recorded | [05-performance.md](05-performance.md) |
 
-## 2. How to wire integration tests against the running server
+You do **not** own: the chess rules implementation (B1), the room actor
+implementation (B2), core protocol design (B3 + F3), or frontend UI (F1–F4).
+Owners supply test cases; you turn them into system tests and gates.
 
-Add the dev-dependency you need (not yet in `Cargo.toml` — you add it, it is
-your call):
+## 2. The MERGE AUTHORITY workflow
 
-```toml
-[dev-dependencies]
-tower = { version = "0.5", features = ["util"] }  # .oneshot() on the Router
-# optionally: tokio-tungstenite (raw WS client) if you drive real sockets
-```
+A module PR from B1/B2/B3 is merged **only** after all three of these, in
+order. "Independently" means you pull the PR branch and run the gates yourself
+— you never merge on the owner's local report alone.
 
-The crate's router needs to be reachable from tests. Today `build_router()`
-lives inside `src/main.rs` (private). **Day-1 action:** ask B3 to move the
-router into a library target so tests can call it, e.g.:
+1. **Owner's module tests green.** The PR author ran their own module suite
+   (e.g. `cargo test game::`) and the PR shows it passing. If a module PR
+   arrives with no tests for the behaviour it adds, send it back — that is a
+   review comment, not a reason for you to write their tests.
+2. **B4 runs the merge gates.** The full copy-paste checklist from
+   [01-merge-gates.md](01-merge-gates.md) on the PR branch: whole-tree build,
+   all suites, the per-module filter for the touched module, fmt, clippy,
+   plus the contract-change review rule (§4 of that doc). The whole-tree
+   `cargo build` is what catches contract drift between modules; the
+   per-module filters let you attribute a failure to the right owner.
+3. **Integration smoke of the merged tree.** After merging, you re-run the
+   entire tree (`cargo build && cargo test`) plus the integration smoke from
+   [02-integration-suite.md](02-integration-suite.md) §4. Today that smoke is
+   the 15 contract tests + `GET /health`; it grows into the real two-client
+   WebSocket smoke as B3's `/ws` endpoint lands.
 
-```rust
-// tests/health_check.rs — your first smoke test
-#[tokio::test]
-async fn health_endpoint_returns_ok() {
-    let app = rechess_backend::build_router();
-    use tower::ServiceExt; // .oneshot()
-    let res = app.oneshot(axum::http::Request::builder()
-        .uri("/health").body(axum::body::Body::empty()).unwrap())
-        .await.unwrap();
-    assert_eq!(res.status(), axum::http::StatusCode::OK);
-}
-```
+If any gate is red, the PR does not merge — the owner fixes it or the team
+agrees (with a tracked issue) to disable a specific gate temporarily. **Never
+make main green by disabling a failing test without approval and a tracked
+issue** (that rule is binding, from your brief §6).
 
-(The typical layout is `src/lib.rs` exposing `pub fn build_router()` plus the
-modules; `main.rs` shrinks to config + serve. You own making that change
-happen as a coordinated PR — it is structural, not feature work.)
+## 3. Doc set index
 
-For socket-level tests, bind an ephemeral port instead:
+| File | Contents |
+|---|---|
+| `README.md` (this file) | Mission, merge-authority workflow, current state, quickstart |
+| `01-merge-gates.md` | The exact gate commands as a copy-paste checklist; what green looks like today and as modules land; contract-change review rule |
+| `02-integration-suite.md` | The ten required end-to-end scenarios: preconditions, driving code sketches, expected events with revisions; the manual two-device smoke checklist |
+| `03-ci-workflow.md` | The complete `.github/workflows/backend-ci.yml` YAML, the later frontend job, branch-protection recommendations |
+| `04-deployment.md` | Multi-stage Dockerfile, .dockerignore, env vars, WSS proxy configs, health check, runbook, rollback |
+| `05-performance.md` | The 50-room/100-player benchmark plan: what to measure, how, results template, acceptance thresholds |
 
-```rust
-let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-let addr = listener.local_addr().unwrap();
-// spawn axum::serve(listener, router) on a tokio task, connect real WS clients to addr
-```
+## 4. Current state (verified by running the commands — 2026-11-27)
 
-## 3. Required test scenarios (from your brief — build these incrementally)
+The frozen **contracts** exist and are green; the **implementations** do not
+exist yet. That is deliberate: the contract layer lets you build the whole
+gate/CI/deployment machinery before any module lands, so every module PR
+arrives into an already-verified world.
 
-- Create room → join → move → game finish (checkmate) → rematch, full flow.
-- Reconnect: disconnect one client, resume with token, full snapshot returned.
-- Draw offer/accept and resignation flows.
-- Authorization: wrong token cannot move; room code alone is not authorization.
-- Multiple rooms concurrently: **50 rooms / up to 100 connected players** as
-  the initial benchmark workload; room A's activity never affects room B.
-- Failure cases: malformed JSON, oversized payloads, unknown versions, dead
-  connections, queue saturation.
+| Gate | Status today | Detail |
+|---|---|---|
+| `cargo build` | **GREEN** | Whole tree compiles. 4 expected `unused dependency` manifest warnings: `rand`, `shakmaty`, `tower-http`, `uuid` — deliberate pins for B1/B2/B3, see [01-merge-gates.md](01-merge-gates.md) §5 |
+| `cargo test` | **GREEN — 15 tests, 3 suites** | `protocol::` unit tests (4), `tests/protocol_contract.rs` (7), `tests/testkit_demo.rs` (4) — full table in [01-merge-gates.md](01-merge-gates.md) §6 |
+| `cargo fmt --all -- --check` | **RED** | Formatting diffs in 8 files. Needs one mechanical `cargo fmt --all` PR first; the gate turns on after it. See [01-merge-gates.md](01-merge-gates.md) §4 |
+| `cargo clippy --all-targets -- -D warnings` | **GREEN (exit 0)** | The 4 unused-dep warnings are cargo *manifest* warnings, not clippy lints, so `-D warnings` does not fail them |
 
-## 4. Local repeatable test setup
+What exists today: `src/protocol/` (all wire types + round-trip tests),
+`src/game/contract.rs` + `src/game/testkit.rs` (engine trait + `FakeEngine`),
+`src/rooms/contract.rs` + `src/rooms/testkit.rs` (registry/handle traits +
+`FakeRegistry`/`FakeHandle`), `src/lib.rs` (`build_router()` + `GET /health`),
+`src/main.rs` (env config: `RECHESS_HOST`, `PORT`, `RUST_LOG`).
 
-Create a small harness (a helper module `tests/common/mod.rs` that starts the
-server on an ephemeral port and hands out connected WS clients — use
-`tokio-tungstenite` as a raw WS client). Make fixtures deterministic:
-- FEN constants for edge-case positions (get them from B1),
-- fixed seeds/short timeouts for lifecycle tests (B2 provides knobs),
-- no real-time sleeps where `tokio::time::pause()` will do.
+What lands later (and what you turn on when it does):
 
-Document the exact command to run everything:
+| Owner lands | New green you should see | Your gate action |
+|---|---|---|
+| **B1** game engine | `cargo test game::` goes 0 → N tests; new `tests/game_engine.rs` | Add `tests/game_engine.rs` run to your expectations; extend integration scenarios with real moves |
+| **B2** rooms actors | `cargo test rooms::` goes 0 → N; new `tests/rooms_actor.rs` | Switch harness scenarios from `FakeRegistry` to the real registry (one-line swap, see [02-integration-suite.md](02-integration-suite.md) §2) |
+| **B3** WS layer | `cargo test network::` goes 0 → N; new `tests/network_protocol.rs` + `tests/network_ws.rs` | Add the socket-level smoke (two real WS clients) to the merged-tree step |
+
+## 5. Quickstart
 
 ```bash
-cd backend
-cargo test                 # unit + integration
-cargo test --test health_check    # one binary
+# In this sandbox the Rust toolchain lives under /tmp/rust — run this before
+# any cargo command (normally rustup reads backend/rust-toolchain.toml, pinned
+# to 1.100.0, automatically):
+export PATH=/tmp/rust/cargo/bin:$PATH RUSTUP_HOME=/tmp/rust/rustup CARGO_HOME=/tmp/rust/cargo
+cd /home/z/my-project/Rechess/backend
+
+# One-time: the pinned toolchain profile is "minimal", so fmt/clippy are not
+# preinstalled — add them once:
+rustup component add --toolchain 1.100.0-x86_64-unknown-linux-gnu rustfmt clippy
+
+cargo build                        # GREEN (+4 expected unused-dep warnings)
+cargo test                         # 15 tests, 3 suites — all green
+cargo fmt --all -- --check        # RED today — see 01-merge-gates.md §4
+cargo clippy --all-targets -- -D warnings   # GREEN (exit 0)
+
+# Boot the server and check the health endpoint:
+cargo run                          # serves GET /health on 0.0.0.0:3000 by default
+curl http://localhost:3000/health
+# {"service":"rechess-backend","status":"ok"}
 ```
 
-## 5. CI workflow (GitHub Actions) — starter example
+## 6. Working agreements for this folder
 
-You own `.github/workflows/` at the repo root. Keep this shape, pinned to the
-toolchain in `backend/rust-toolchain.toml`:
-
-```yaml
-# .github/workflows/backend.yml  (create this file)
-name: Backend CI
-on:
-  pull_request: { paths: ['backend/**'] }
-  push: { branches: [main], paths: ['backend/**'] }
-defaults: { run: { working-directory: backend } }
-jobs:
-  backend:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --check
-      - run: cargo clippy -- -D warnings    # agree the policy with the team first
-      - run: cargo test
-      - run: cargo build --release
-```
-
-Coordinate with F3/F4 so a frontend job (typecheck + lint) runs in the same
-repo, even as a separate workflow file. Do not make main green by disabling
-failing tests without approval and a tracked issue.
-
-## 6. Dockerfile — starter example (create `backend/Dockerfile`)
-
-```dockerfile
-# Multi-stage, cargo-chef for layer caching, minimal runtime, non-root user.
-FROM lukemathwalker/cargo-chef:latest-rust-1.100 AS chef
-WORKDIR /app
-
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-FROM chef AS builder
-COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
-COPY . .
-RUN cargo build --release --bin rechess-backend
-
-FROM debian:trixie-slim AS runtime
-RUN useradd --system --uid 1001 rechess
-COPY --from=builder /app/target/release/rechess-backend /usr/local/bin/
-USER rechess
-ENV PORT=3000
-EXPOSE 3000
-CMD ["rechess-backend"]
-```
-
-Health checks use `GET /health` (already implemented in `src/main.rs`).
-
-## 7. Deployment & runbook checklist (document in backend/README.md §)
-
-- [ ] Environment variables documented (`RECHESS_HOST`, `PORT`, `RUST_LOG`)
-- [ ] Reverse proxy performs WebSocket upgrade + WSS (TLS termination) and
-      allows long-lived connections (no aggressive timeouts)
-- [ ] Logs structured, no `player_token` or secrets ever logged
-- [ ] Room state is **in-memory only**: restart wipes rooms — document this
-      limitation for the report/demo
-- [ ] README has exact local + deployed connection instructions for the Expo
-      client (LAN IP vs WSS URL)
-- [ ] Performance report: CPU, RSS, connections, rooms, move latency at idle
-      and under the 50-room/100-player load — **measured**, with hardware,
-      OS, build profile and tooling recorded; never claimed from language
-      choice alone
-
-## 8. Coordination
-
-- B1: convert rule edge cases into regression tests (fixtures).
-- B2: room races + lifecycle tests; ask for deterministic knobs early.
-- B3: protocol/malformed-input/authorization tests; co-own the two-client
-  harness (don't build duplicate harnesses).
-- F3/F4: end-to-end tests spanning the real client; make frontend typecheck
-  failures visible in CI.
-- Maintain the known-issues list and a release acceptance checklist; coordinate
-  the freeze window before final submission.
+- Each `.rs` file in `backend/tests/` is a separate integration-test binary
+  against the crate. You own this folder; feature owners add cross-module
+  tests here only in coordination with you. Their unit tests live in their own
+  `src/*/` folders.
+- Test-file naming convention (used by the module docs and this doc set):
+  `protocol_contract.rs` (today), `testkit_demo.rs` (today), then
+  `game_engine.rs` (B1), `rooms_actor.rs` (B2), `network_protocol.rs` +
+  `network_ws.rs` (B3). When you add the B4-owned end-to-end suite, extend
+  this convention (e.g. `websocket_two_player.rs`, `room_isolation.rs`,
+  `concurrent_moves.rs`, `reconnect_flow.rs`, `game_lifecycle.rs`,
+  `load_smoke.rs`).
+- Dev-dependencies you will need (add via a short PR to `Cargo.toml` — you
+  curate it together with the team): `tower` (feature `util`, for
+  `.oneshot()` router calls) and `tokio-tungstenite` (raw WS clients for the
+  socket-level suite). Keep `Cargo.lock` committed.
+- Docs live here too; the CI YAML is documented in
+  [03-ci-workflow.md](03-ci-workflow.md) and created by you at the repo root
+  as `.github/workflows/backend-ci.yml`.
