@@ -36,7 +36,8 @@ pub enum ClientCommand {
     /// Join a waiting room by code; guest takes Black. Private reply: `room.joined`.
     #[serde(rename = "room.join")]
     JoinRoom {
-        /// 8 chars from the unambiguous alphabet, case-insensitive (B2 normalizes).
+        /// 8 chars from the unambiguous alphabet, case-insensitive (normalized
+        /// by B3 at the gate: trim + uppercase, before B2 lookup).
         room_code: String,
         nickname: String,
     },

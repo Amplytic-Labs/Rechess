@@ -267,6 +267,16 @@ rollback, do not pretend state survived.
   `.with_graceful_shutdown(...)` on the `axum::serve` call in `main.rs`
   before the first production deploy.
 
+**Client connection (how a phone points at the backend)**
+
+- Local: set `EXPO_PUBLIC_API_URL=ws://<LAN-IP>:3000/ws` in the frontend env
+  (`frontend/.env`) and load the app in Expo Go via the QR code — phone and
+  backend must be on the same LAN.
+- Production: `EXPO_PUBLIC_API_URL=wss://<host>/ws`, TLS terminated in front
+  (§6) — never point a production client at plain `ws://`.
+- The client side (connect, resume, heartbeat) is F3's:
+  `frontend/src/services/02-websocket-service.md`.
+
 ## 8. Where to deploy (platform)
 
 The brief does **not** name a hosting platform; the master plan (§14)
@@ -292,3 +302,11 @@ else has correct defaults. Before committing the choice, run the §7 verify
 checklist against the platform's preview URL, especially the 2-minute idle
 WebSocket check (catches aggressive platform-level proxies in front of the
 WSS endpoint).
+
+**Release sign-off (before final submission)**
+
+- Coordinate a code freeze window (no merges except release fixes) with all
+  owners.
+- Re-run the full release acceptance checklist (§7 verify + the platform
+  checks above).
+- Record known issues in [05-performance.md](05-performance.md) §6.

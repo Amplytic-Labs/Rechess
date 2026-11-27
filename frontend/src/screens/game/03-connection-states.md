@@ -4,7 +4,7 @@ The happy path is doc 01. This doc is everything that can go wrong — and it
 is where the screen proves the golden rule: **the displayed position is only
 ever the server's snapshot.**
 
-## 1. Pending move — after `onMove`, before `game.state`
+## 1. Pending move — after `onMoveSubmit`, before `game.state`
 
 **Rule (RULES.md §4, protocol §5): NEVER show your own move applied.** The
 board component reports the attempt; the server is the only authority. There
@@ -12,7 +12,7 @@ is no optimistic board commit in this app.
 
 What you build:
 
-- `onMove` → immediately hand off to `sendMove(...)` and render a **pending
+- `onMoveSubmit` → immediately hand off to `submitMove(...)` and render a **pending
   indicator** keyed to `pending` from `useGameState()` (F3 sets it on send and
   clears it on the next `game.state` / rejection): a small spinner next to
   your player bar and/or "Sending move…" in the turn indicator (HeroUI
@@ -42,9 +42,8 @@ result**:
 - Show the mapped friendly message (doc 02 §5) for `error` — most commonly
   `NOT_YOUR_TURN`, `ILLEGAL_MOVE`, `STALE_REVISION`, `GAME_FINISHED`.
 - **Reconcile from the fresh snapshot — never patch the board yourself.**
-  Because F3 applied the newer snapshot, your board props (`fen`,
-  `legalMoves`, `turn`, `lastMove`, `checkSquare`) already re-derive from it;
-  make sure they are store-driven so this is automatic.
+  Because F3 applied the newer snapshot, the board's `snapshot` prop already
+  re-derives from it; make sure it is store-driven so this is automatic.
 - UX: a short-lived toast/banner, auto-dismisses (doc 02 §5). The player's
   selection is F2's local state; their contract clears it when `fen`/revision
   changes — nothing for you to reset.

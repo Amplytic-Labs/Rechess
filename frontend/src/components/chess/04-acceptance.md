@@ -53,7 +53,7 @@ export interface ChessBoardProps {
 
 - Wiring into the game screen: passing the snapshot from F3's store
   (`useGameState()`), `orientation` from the session color
-  (`useRoomState().yourColor`), and `onMoveSubmit` → F3's `sendMove`.
+  (`useRoomState().yourColor`), and `onMoveSubmit` → F3's `submitMove`.
 - Pending-move state: F4 sets `disabled` while a submitted move awaits the
   next `game.state` (or its own in-flight lock); the board has no queue.
 - Rejected-move UX: F3/F4 surface `game.move_rejected` (`ILLEGAL_MOVE`,
@@ -65,17 +65,11 @@ export interface ChessBoardProps {
   F3's store owns both (F3's `src/services/README.md` §5–6) — deliberately
   NOT in `BoardMove`.
 
-**Stale references F4 should fix in their README via PR** (flagged, not
-edited by us): §6 still says `npx jest game` — RULES.md §5 (no test runner by
-design) supersedes it; §3's pointer "F2's ChessBoard props contract:
-`src/components/chess/README.md` §4" remains valid — that section now holds
-the snapshot-based contract above (the old flat `fen`/`legalMoves`/jest
-proposal is superseded).
-
 ## 3. Open questions to settle (Day 1, with F3/F4)
 
-1. Confirm the contract shape: whole `snapshot` (recommended) vs flat
-   `fen`/`legalMoves`/`lastMove` props — then freeze and update both READMEs.
+1. Contract shape — settled: the whole-`snapshot` form is frozen (this §2
+   and F4's `01-screen-composition.md` §4 both hold it); the flat
+   `fen`/`legalMoves`/`lastMove` alternative was not adopted.
 2. Confirm `BoardMove` as the `game.move` payload minus `expected_revision`,
    and that F4 adds nothing else (callback name `onMoveSubmit` agreed?).
 3. Promotion-picker dismissal: keep selection (recommended) vs clear — pick

@@ -40,7 +40,7 @@ cargo test game::        # B1's engine   (0 tests today — grows when B1 lands)
 cargo test rooms::       # B2's registry  (0 tests today — grows when B2 lands)
 cargo test network::     # B3's WS layer (0 tests today — grows when B3 lands)
 
-# GATE 4 — formatting (RED today — see §4 before you enforce it).
+# GATE 4 — formatting (required as-is; see §4).
 cargo fmt --all -- --check
 
 # GATE 5 — static analysis, warnings denied.
@@ -58,7 +58,7 @@ What each gate must show:
 | 1 | `cargo build` | exit 0 | **GREEN** — exits 0 with 4 expected unused-dependency manifest warnings (`rand`, `shakmaty`, `tower-http`, `uuid`) — see §5 |
 | 2 | `cargo test` | `test result: ok` in **every** suite, 0 failed | **GREEN** — 15 tests / 3 suites (§6) |
 | 3 | `cargo test <module>::` | PR's module filter runs ≥ 1 test if the PR touches that module | `protocol::` 4 passed; `game::`/`rooms::`/`network::` match 0 tests until those modules land |
-| 4 | `cargo fmt --all -- --check` | exit 0, empty output | **RED** — exit 1, diffs in 8 files; see §4 |
+| 4 | `cargo fmt --all -- --check` | exit 0, empty output | **GREEN** (as of 2026-11-27) — exit 0, empty output; the base was formatted |
 | 5 | `cargo clippy --all-targets -- -D warnings` | exit 0 | **GREEN** — exit 0 (the 4 manifest warnings do not fail clippy; they are not rustc lints) |
 | 6 | `cargo build --release` | exit 0 | **GREEN** — verified: `Finished release profile [optimized] target(s) in 1m 07s`, binary `target/release/rechess-backend` ≈ 2.0 MB (thin LTO + stripped) |
 
@@ -86,29 +86,10 @@ $ cargo test rooms::      → all four binaries: 0 passed (4, 7 and 4 filtered o
 $ cargo test network::    → all four binaries: 0 passed (4, 7 and 4 filtered out)
 ```
 
-## 4. Gate 4 (fmt): red today — turn-on procedure
+## 4. Gate 4 (fmt): required as-is
 
-`cargo fmt --all -- --check` **fails on the current tree** (exit 1). The
-existing code was written in a denser layout than rustfmt 1.100 emits; the
-diffs are pure formatting (line breaks in struct literals, import reordering)
-across 8 files: `src/game/testkit.rs`, `src/protocol/mod.rs`,
-`src/protocol/server_message.rs`, `src/rooms/contract.rs`,
-`src/rooms/testkit.rs`, `src/main.rs`, `tests/protocol_contract.rs`,
-`tests/testkit_demo.rs`.
-
-Do **not** turn the gate on silently and do not mix formatting into a feature
-PR. Procedure:
-
-1. Open a dedicated, mechanical PR: `cargo fmt --all`, commit with message
-   like `chore: apply rustfmt (no logic changes)`, no other changes. Review
-   with `git diff` that it contains only whitespace/line-break changes.
-2. Land it with all owners' awareness (it touches every module folder).
-3. From then on `cargo fmt --all -- --check` is a required gate — locally
-   (this checklist) and in CI (03-ci-workflow.md). CI turns it on in the same
-   commit that adds the workflow, or the workflow will fail every PR.
-4. Optionally add a `rustfmt.toml` (e.g. `edition = "2021"`) if the team wants
-   stable formatting across rustfmt versions — a team decision, not yours
-   alone.
+The base was formatted (`cargo fmt --all -- --check` exits 0, verified
+2026-11-27) — the gate is required as-is.
 
 ## 5. Gate 5 (clippy): the deliberate unused-dependency pins
 

@@ -28,7 +28,8 @@ doc updated) — not "should work".
 - [ ] **docs/protocol-v1.md with examples and state diagrams.**
   Exists as DRAFT; your job: the Day-1 freeze review with F3 — close the
   register of doc 02 §9 (D1–D6) in that review, update the doc, and publish
-  the same-PR type updates if any decision changes a wire shape (D4 does).
+  the same-PR type updates if any decision changes a wire shape (D4 — a
+  resolved example — is the cautionary tale).
 - [ ] **Connection reader/writer and bounded outbound delivery.**
   Satisfied by: `connection::run` (doc 01 §4): split socket, writer task
   owning the sink, `OUTBOUND_QUEUE`-bounded mpsc, slow-client disconnect
@@ -58,7 +59,7 @@ doc updated) — not "should work".
 | unauthorized handled | layer (b) unbound-connection test + injected-identity assertion |
 | stale handled | B2's `STALE_REVISION` via `expected_revision` — you forward it; layer (b) gains a case when D1 lands |
 | no credential leaks | layer (a) token tests (4–5) + layer (b) broadcast assertions |
-| Rust and TS types match the frozen doc | D4 closure (doc 02 §9) + F3 running their `protocol.test.ts` fixtures against the same examples |
+| Rust and TS types match the frozen doc | the resolved D4 case (doc 02 §9) + F3's typed fixtures in `protocol.fixtures.ts` matching the same examples |
 
 ### 1.3 Required-work items from the brief §2 not covered above
 
@@ -156,9 +157,9 @@ Everything F3's client may rely on, in one place — mirror this in
   `expected_revision` for the next command comes from the `game.state`
   that follows (open decision D5, doc 02 §9); do not send state-changing
   commands until you have seen a revision.
-- `room.leave` payload shape: **unresolved (D4)** — the TS types currently
-  say `{}`, the Rust wire accepts absent/`null` today; the freeze review
-  decides. Until then TS should send `"payload": null` (accepted by both).
+- `room.leave` payload shape: **resolved (D4, in the base)** — both sides
+  send `"payload": {}` (TS `EmptyPayload`, Rust `LeaveRoom {}` struct
+  variant); `null` and absent are rejected. Pinned by the round-trip tests.
 
 **The 12 stable error codes** (docs §6, verbatim — map each to a themed UI
 message):
@@ -242,7 +243,8 @@ event, it is a server bug — report it to B3/B2, do not log the token.
 ## 5. Before you call it done — the open register
 
 The doc-02 §9 register must show **D1 (dedup) and D2 (rejection channel)
-closed with B2, D3/D4/D5 closed with F3/B2 as marked** before the module
+closed with B2, D3/D5 closed with F3/B2 as marked — D4 is already resolved
+in the base** before the module
 is "done" in the Table-19 sense. Each closure is: decision, PR (if types
 change), doc update, and a test that pins the agreed behavior. Until then
 you have built a correct pipe with two unspecified joints — say so in the

@@ -64,10 +64,11 @@ configs. Cross-folder changes go through a short PR the owner approves.
   slices (from your stores) and command senders (through your service).
   Screens subscribe with narrow selectors and call actions — they never
   see the socket, the envelope, or the token.
-- **F2 is pure props.** F2's `ChessBoard` receives `fen`, `legalMoves`,
-  orientation and an `onMove` callback from F4; it does not consume your
-  hooks directly. Do not add imports of `@/hooks` or `@/store` into
-  `src/components/chess/`.
+- **F2 is pure props.** F2's `ChessBoard` receives the whole `snapshot`
+  (`GameSnapshot`), `orientation`, and an `onMoveSubmit` callback from F4
+  (the frozen contract: `src/components/chess/README.md` §4); it does not
+  consume your hooks directly. Do not add imports of `@/hooks` or `@/store`
+  into `src/components/chess/`.
 - **The server is authoritative.** You never compute FEN, legal moves,
   or results client-side, and you never optimistically apply a move
   (RULES.md §4, doc 03).
@@ -123,8 +124,9 @@ Point the app at the backend: set `EXPO_PUBLIC_API_URL` in `.env`
 - **B2** (rooms): owns token verification, reconnect grace, room
   retention — the server-side half of doc 04.
 - **F1** (lobby): consumes `useRoomActions().createRoom/joinRoom` and
-  `useRoomState()` (their README §6 pins these names).
+  `useRoomState()` (their `04-acceptance.md` §2 pins these names).
 - **F4** (game screen): consumes `useGameState()`, `useRoomState()`,
-  `useRoomActions()`, `useConnection()` (their README §3 pins these).
+  `useRoomActions()`, `useConnection()` (their `01-screen-composition.md` §6
+  pins these).
 - **B4** (CI/deployment): runs the same typecheck/lint gates; keep your
   connection states observable for their end-to-end tests.

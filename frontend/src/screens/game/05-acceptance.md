@@ -8,12 +8,12 @@ Brief: `scripts/extracted_docs/09_F4_Game_Screen_Integration.md`.
 |---|---|---|---|
 | §2 | Agree route/screen contract with F1/F3; screen receives only non-secret refs | Route `src/app/game.tsx` takes room code only; token stays in F3's secure storage | Doc 01 §1; checklist C5 |
 | §2 | GameScreen layout for common phone ratios, responsive spacing | Composition tree + layout rules; board full-width, bounded history | Doc 01 §2–§3; checklist §3 |
-| §2 | Embed F2's board with authoritative FEN/legal moves/last move/orientation/disabled/check props | Snapshot → `ChessBoardProps` mapping table (all 7 props) | Doc 01 §4 |
+| §2 | Embed F2's board with authoritative FEN/legal moves/last move/orientation/disabled/check props | Snapshot-based `ChessBoardProps` mapping table (4 props) | Doc 01 §4 |
 | §2 | Subscribe to F3's state; render server-derived values; no second copy of board/turn state | Hooks-only wiring; single derivation point; narrow selectors | Doc 01 §6 |
 | §2 | Player nicknames, colors, connected status, whose turn | `PlayerInfo` bars + presence dots + active-turn highlight | Doc 01 §5 |
 | §2 | Move history in SAN, scrollable, readable | `move_history` SAN pair rows, newest visible, performance note | Doc 01 §5 |
 | §2 | Draw offer/accept, resign, rematch via F3 actions; confirm destructive ones | Draw states table; resign Dialog; rematch vote flow | Doc 02 §1–§3 |
-| §2 | Show check, checkmate, stalemate, draw, resignation, disconnect states; distinguish disconnect from finished | checkSquare derivation; result mapping; separate presence/connection banners vs result view | Doc 01 §4.2, Doc 02 §4, Doc 03 §3–§4/§6 |
+| §2 | Show check, checkmate, stalemate, draw, resignation, disconnect states; distinguish disconnect from finished | check highlight internal to F2's board (from `game_status`); result mapping; separate presence/connection banners vs result view | Doc 01 §4.2, Doc 02 §4, Doc 03 §3–§4/§6 |
 | §2 | Game-over/result view with winner/reason and rematch status | Full `GameResultReason` mapping table + rematch status UX | Doc 02 §3–§4 |
 | §2 | Connection banner, reconnect/loading states; board disabled while disconnected or not current player | Banner states from `useConnection()`; one disabled expression | Doc 03 §4–§5 |
 | §2 | Handle rejected moves without manually patching the board | Rejection → mapped toast + snapshot reconcile | Doc 03 §2, Doc 02 §5 |
@@ -36,26 +36,21 @@ Brief: `scripts/extracted_docs/09_F4_Game_Screen_Integration.md`.
 
 ### F2 — `src/components/chess/README.md`
 
-- Consumed exactly: component `ChessBoard`, props `fen`, `orientation`,
-  `legalMoves`, `lastMove: {from,to} \| null`, `checkSquare`, `disabled`,
-  `onMove({from,to,promotion?})`.
-- F2's README §3 mentions `tailwind.config.js` / `ThemeProvider.tsx` for
-  tokens — **stale**; tokens actually live in `global.css`, no config, no
-  provider (RULES.md §1.3). Does not affect the props; ignore those lines.
-- F2's README §6 mentions `npx jest` — **superseded** by RULES.md §5 (no
-  jest). Testing for F2 is also typecheck/lint + manual.
+- Consumed exactly: component `ChessBoard`, props `snapshot: GameSnapshot`,
+  `orientation`, `disabled?`, `onMoveSubmit({from,to,promotion})`
+  (`promotion` always present: `Promotion | null`).
 - Open item to confirm with F2: the actual export name and file path of the
   board component (`chess-board.tsx` is their suggestion, not final).
 
 ### F3 — `src/services/README.md` (+ future `src/hooks/`)
 
-- Consumed exactly: `useRoomActions()` (`sendMove`, `offerDraw`,
+- Consumed exactly: `useRoomActions()` (`submitMove`, `offerDraw`,
   `acceptDraw`, `resign`, `rematch`, `leaveRoom`), `useRoomState()`
-  (`roomCode`, `players`, `status`, `drawOffer`, `yourColor`),
-  `useGameState()` (snapshot fields + `pending`), `useConnection()`
+  (`roomCode`, `players`, `status`, `yourColor`),
+  `useGameState()` (`snapshot` + `pending`), `useConnection()`
   (`"connecting"|"connected"|"reconnecting"|"disconnected"`).
-- Brief-vs-repo name mismatches resolved in favor of F3's README §7:
-  brief's `makeMove` → `sendMove`; brief's `requestRematch` → `rematch`;
+- Brief-vs-repo name mismatches resolved in favor of F3's doc 03 §5:
+  brief's `makeMove` → `submitMove`; brief's `requestRematch` → `rematch`;
   planning notes' `useGameSnapshot`/`useRoom`/`useConnectionStatus`/
   `useSendCommand` → `useGameState`/`useRoomState`/`useConnection`/
   `useRoomActions`.
@@ -88,10 +83,10 @@ Brief: `scripts/extracted_docs/09_F4_Game_Screen_Integration.md`.
 2. **No `destructive-foreground` token** — solid destructive buttons need
    `text-primary-foreground` or the outline variant. If that reads badly,
    propose the token via a PR to `global.css`. (Doc 02 §2.)
-3. **`checkSquare` is not in the snapshot** — F4 derives the checked king's
-   square from FEN (rendering-only parse). If F2 would rather own this
-   (their `fen-board.ts` already parses the FEN), coordinate — it's their
-   contract field. (Doc 01 §4.2.)
+3. **Check-square derivation — resolved with the snapshot contract:** F2's
+   board derives the checked king's square from the FEN internally when
+   `game_status === "check"` (their doc 02 §3); F4 passes no `checkSquare`
+   prop. (Doc 01 §4.2.)
 4. **Presence freshness** — between `player.presence` events the snapshot's
    `players[].connected` can be stale; the screen reads players through
    F3's hooks. Confirm F3 merges presence into room state exactly once.

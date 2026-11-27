@@ -1,5 +1,9 @@
 # 05 — Manual testing (there is NO test runner — by design)
 
+> **Accepted deviation:** the original brief's "unit tests" deliverable is
+> deliberately replaced by this manual + typecheck strategy (team decision
+> — jest-expo is broken upstream, see RULES.md §5).
+
 > RULES.md §5: jest-expo is broken upstream (SDK 58 + Jest 30); the team
 > decided the frontend is verified by `npm run typecheck` + `npm run lint`
 > + manual checklists. **Never write jest tests.** The wire contract
@@ -46,20 +50,20 @@ waiting room, F4's game screen) reflects it.
 
 **S1 — create → join happy path.** Device A: create room with nickname →
 expect `connectionStore.status === "connected"`, `roomStore.roomCode`
-set (8 chars), `myColor === "white"`, `status === "waiting"`, one player
+set (8 chars), `yourColor === "white"`, `status === "waiting"`, one player
 in `players`; SecureStore holds token + room code. Device B: join with
-the code → `myColor === "black"`, two players, `status === "active"` (or
+the code → `yourColor === "black"`, two players, `status === "active"` (or
 the room-state event your flow expects), both devices show both players.
 Promises: A's `createRoom` resolved `{ roomCode, yourColor }`.
 
 **S2 — move + snapshot update.** A (white) plays e2e4 → on A:
-`gameStore.pendingMove` set while waiting; on `game.state`
-(revision 1): `pendingMove === null`, `snapshot.fen` updated, `fen` turn
+`gameStore.pending` set while waiting; on `game.state`
+(revision 1): `pending === null`, `snapshot.fen` updated, `fen` turn
 `"black"`, `move_history` contains `"e4"`, `revision === 1`. Device B
 sees the same snapshot. Then B plays a legal reply; snapshots sync again.
 
 **S3 — move rejected flow.** B (black) tries to move on white's turn (or
-an illegal square): `game.move_rejected` → `pendingMove === null`,
+an illegal square): `game.move_rejected` → `pending === null`,
 `lastError` shows the safe message, board unchanged; then B moves
 legally → works (server state not corrupted).
 
@@ -72,7 +76,7 @@ whether RN auto-pongs on each platform you can test (doc 02 §9).
 **S5 — disconnect/reconnect with resume.** With a game in progress:
 airplane-mode device A ~10 s, back online → status
 `reconnecting` → after backoff, `session.ready` with the current
-snapshot → `connected`, same room, board identical to B's, pendingMove
+snapshot → `connected`, same room, board identical to B's, pending
 cleared. Within B2's grace (~60 s) the seat survives. Bonus: background
 the app > grace → resume should fail with `INVALID_TOKEN`/`ROOM_NOT_FOUND`.
 

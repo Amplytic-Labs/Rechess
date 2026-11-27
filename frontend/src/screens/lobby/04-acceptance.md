@@ -29,17 +29,20 @@ Each row quotes a requirement from the F1 brief
 
 ## 2. Handoff to F3 — what your screens need from them
 
-Per `src/services/README.md` §7, F3's proposed public API (freeze the names
-together on Day 1 — that README is the source of truth if anything here
+Per `src/services/03-stores-and-hooks.md` §5, F3's public API (freeze the names
+together on Day 1 — that doc is the source of truth if anything here
 differs):
 
 ```ts
-useRoomActions()  // createRoom, joinRoom, resumeRoom, leaveRoom, sendMove,
-                  // offerDraw, acceptDraw, resign, rematch — each sets loading/error
-useRoomState()    // roomCode, players, status, drawOffer, yourColor
+useRoomActions()  // createRoom, joinRoom, leaveRoom, submitMove, offerDraw,
+                  // acceptDraw, resign, rematch — each sets loading/error
+useRoomState()    // roomCode, players, status, yourColor
 useGameState()    // the snapshot + pending
 useConnection()   // connection state for banners/disabled states
 ```
+
+(Resume is not a screen action — it is automatic inside F3's service
+(`session.resume`, doc 02 §7); screens never call a resume action.)
 
 What your four screens consume:
 
@@ -61,9 +64,7 @@ F3's README splits connection into its own `useConnection()` hook and names
 the color field `yourColor`. **F3's README wins** — use `yourColor` +
 `useConnection()`, and confirm the frozen names with F3 before you build.
 
-**Flag — stale testing section in F3's README:** `src/services/README.md` §8
-still mentions `npx jest`; RULES.md §5 (no jest, by design) overrides that.
-Also: your hooks live in `src/hooks/` (F3-owned) — confirm the module path for
+Note: your hooks live in `src/hooks/` (F3-owned) — confirm the module path for
 imports with F3.
 
 ## 3. Handoff to F4 — navigation into the game

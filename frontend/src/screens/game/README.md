@@ -23,8 +23,8 @@ index; the numbered files are the actual instructions.
 You own the **in-game screen**: everything the player sees after both players
 are in the room. The screen **composes** three other teammates' work:
 
-- **F2's `ChessBoard`** (presentational) — you pass it the authoritative
-  FEN/legal moves and it reports attempted moves back to you.
+- **F2's `ChessBoard`** (presentational) — you pass it the whole server
+  snapshot plus your color, and it reports attempted moves back to you.
 - **F3's hooks/actions** (one WebSocket connection, server-authoritative
   zustand stores) — the screen never opens a socket and never keeps a second
   copy of game state.
@@ -55,7 +55,7 @@ result view, connection/presence banners, pending-move and disabled states.
    `border`, `destructive`, `success` (board tokens `board-light`,
    `board-dark`, `move-target`, `last-move`, `check` are F2's concern).
    No `bg-[#…]`, no color literals — dark mode must work with zero extra work.
-3. **Never optimistically apply a move.** After `onMove` fires, set nothing on
+3. **Never optimistically apply a move.** After `onMoveSubmit` fires, set nothing on
    the board yourself — F3's store marks `pending` and the next `game.state`
    snapshot updates the board (RULES.md §4, protocol §5).
 4. **Map every `ErrorCode` to a friendly themed message** — never show raw
@@ -107,7 +107,7 @@ Build order (matches your brief's integration plan):
    `sampleSnapshot` / `sampleFinishedSnapshot` from
    `@/types/protocol.fixtures` instead of live hooks (the props-injected dev
    variant documented in `04-manual-testing.md` §1). Wire F2's `ChessBoard`
-   with a fixture FEN.
+   with the fixture snapshot.
 2. **Day 3–4 — real state.** Swap the dev variant for F3's real hooks
    (`useGameState`, `useRoomState`, `useRoomActions`, `useConnection` — exact
    names in `01-screen-composition.md` §6) and prove two-device move sync

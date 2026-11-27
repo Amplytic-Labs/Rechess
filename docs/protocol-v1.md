@@ -33,7 +33,7 @@
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `v` | number | ✔ | Protocol version. Unsupported ⇒ `UNSUPPORTED_VERSION` error. |
-| `id` | string | ✔ | Unique per client (suggest UUID). Used for dedup; echoed nowhere except errors if agreed. |
+| `id` | string | ✔ | Unique per client (suggest UUID). The server never echoes `id` in v1; it is used for dedup only. |
 | `type` | string | ✔ | Command name (namespaced `area.action`). |
 | `payload` | object | ✔ | Per-command fields (may be `{}` for e.g. `room.leave`). |
 
@@ -71,7 +71,8 @@
 
 Payload validation (enforced by B3 at the gate, before B2):
 nickname 1–20 chars, no control characters; room code 8 chars from
-`ABCDEFGHJKMNPQRSTUVWXYZ23456789`, case-insensitive (server uppercases);
+`ABCDEFGHJKMNPQRSTUVWXYZ23456789`, case-insensitive (the server normalizes
+room codes — trim + uppercase at the transport gate — before lookup);
 unknown/missing fields in `payload` ⇒ `INVALID_PAYLOAD`.
 
 ## 4. Server events (v1)

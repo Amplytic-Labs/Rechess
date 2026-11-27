@@ -146,7 +146,7 @@ const pieces = useMemo(() => fenToPieces(snapshot.fen), [snapshot.fen]);
 
 The **local player's color** arrives via the `orientation` prop — F4 gets it
 from F3's session state (the `color` from `session.ready`, surfaced as
-`useRoomState().yourColor` per F3's `src/services/README.md` §7). The board
+`useRoomState().yourColor` per F3's `src/services/03-stores-and-hooks.md` §5). The board
 does NOT derive it: `snapshot.players` says who plays which color, but only
 F3's session knows which of them is holding this device.
 

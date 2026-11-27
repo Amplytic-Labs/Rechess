@@ -107,7 +107,7 @@ Rules:
      revision guard (doc 03 §3).
    - `player.presence` — update the player's `connected` flag in
      `roomStore`.
-   - `game.move_rejected` — clear `pendingMove`, set the safe error,
+   - `game.move_rejected` — clear `pending`, set the safe error,
      apply `payload.snapshot` if present.
    - `game.finished` — apply the final snapshot + result.
    - `server.error` — map `payload.error` to a friendly themed message
@@ -212,7 +212,7 @@ was in a room:
 3. `session.ready` (`SessionReadyPayload: { player_id, color, snapshot }`)
    ⇒ **replace the whole local game state** with `payload.snapshot`
    (atomic `set()` in `gameStore`, doc 03 §3), restore identity, mark
-   `connected`, clear `pendingMove` (the server is the arbiter of whether
+   `connected`, clear `pending` (the server is the arbiter of whether
    the pending move landed — it is in the snapshot or it never happened).
    Note: `session.ready` itself carries no revision; per B3 doc 02 §9
    (D5) the server follows it with a `game.state` carrying the envelope

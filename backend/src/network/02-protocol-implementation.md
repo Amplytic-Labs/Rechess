@@ -148,6 +148,7 @@ Per-connection token bucket (constants in `limits.rs`):
 |---|---|---|
 | Commands | 10/s, burst 20 | Chess pace is a few commands per *minute*; 10/s is ~100x headroom while still catching runaway retry loops. |
 | `room.create` / `room.join` / `session.resume` | 1 per 10 s per connection | Room-code guessing / room-hopping throttle (room codes are identifiers, not secrets). B2 re-guards too; the cheap B3 gate protects B2 first. |
+| `Origin` header | validate against an explicit allowlist (config via env) | Browser clients only. Native Expo clients may omit `Origin` — token auth + TLS remain required. MVP is native-only: the Origin check is deferred until a web client exists (recorded decision, brief §6). |
 
 Violation → `server.error` `RATE_LIMITED`, connection stays (first offenses
 are recoverable); a client that keeps tripping the bucket after the error (5+
@@ -488,44 +489,19 @@ and a next action. Do not silently pick one: each crosses a module boundary.
 | D1 | Command-id dedup location (`RoomCommand` carries no id; doc §5 wants actor-side dedup) | **OPEN — Day 1** | Option A: B2 dedups; extend `RoomCommand` with the id in a B2+B3 PR (§5.3) | B2 + B3 |
 | D2 | Single rejection channel (`CommandOutcome::Rejected` vs `RoomEventKind::MoveRejected`) | **OPEN — Day 1** | v1: outcome path for sync rejections; event path only when B2 attaches a snapshot; never both (§7.4) | B2 + B3 |
 | D3 | `room.leave` success behavior (no ack event exists in v1) | **OPEN** | On accepted `Leave`: send Close(1000, "left room") and end the connection; on rejected: `server.error`. F3 must treat that close as success (not as a reconnect trigger). Alternative rejected: keeping the socket unbound for re-binding invites room-hopping abuse. | B3 + F3 |
-| D4 | `room.leave` payload shape — **verified divergence** | **OPEN — Day 1 freeze review** | see below | B3 + F3 |
+| D4 | `room.leave` payload shape | **RESOLVED (fixed in the base)** | struct variant — payload `{}` in both directions; see below | B3 + F3 |
 | D5 | How a resumed client learns the current `expected_revision` (`session.ready` carries no revision; `Resumed` carries none either) | **OPEN** | B2 emits `RoomEventKind::Snapshot { revision, … }` to the resumed connection right after the private reply — zero wire change, the client reads the envelope revision from that `game.state` (§6.3) | B2 + B3, F3 informed |
 | D6 | Unknown extra fields in `payload` | **KNOWN GAP, acceptable v1** | serde's default *ignores* unknown fields (doc §3 says `INVALID_PAYLOAD`); missing/wrong-typed fields are rejected. Strict rejection would need `deny_unknown_fields` on the payload variants — a protocol PR (and serde's `flatten`+`deny` interactions must be re-tested). Harmless in v1 (extra fields carry no semantics); park it. | B3 + F3, low priority |
 
-### D4 in detail — `room.leave` payload `{}` vs no payload (verified)
+### D4 in detail — `room.leave` payload `{}` (RESOLVED — fixed in the base)
 
-Empirically verified against the frozen types (probe + doc 03 tests):
-
-- Today's Rust: `ClientCommand::LeaveRoom` is a **unit variant**; with
-  `#[serde(tag = "type", content = "payload")]`, it serializes as
-  `{"v":1,"id":"i","type":"room.leave"}` — **no `payload` key** — and
-  deserialization accepts `payload` **absent or `null`** but **rejects
-  `"payload": {}`** (`invalid type: map, expected unit variant`).
-- `docs/protocol-v1.md` §2.1 says `payload` is **Required ✔** and §3 lists
-  `room.leave | {}`; F3's `frontend/src/types/protocol.ts` mirrors that
-  (`payload: EmptyPayload`). **A TS client sending `{}` would today get
-  `INVALID_PAYLOAD` from the Rust server.**
-
-**Recommended fix (one small protocol PR, both sides, per the change rule):**
-change the unit variant to a zero-field struct variant in
-`backend/src/protocol/client_message.rs`:
-
-```rust
-// before (unit variant):  LeaveRoom,
-// after  (struct variant):
-    /// Leave the room explicitly.
-    #[serde(rename = "room.leave")]
-    LeaveRoom {},
-```
-
-Verified behavior of the struct-variant form: serializes
-`"payload":{}` (matching the doc and TS), accepts `{}`, rejects
-`null`/absent. Two mechanical follow-ups in the same PR: construction sites
-must write `ClientCommand::LeaveRoom {}` (brace-less unit syntax no longer
-compiles — `backend/src/protocol/mod.rs`'s
-`every_client_command_round_trips` constructs it), and F3 confirms the TS
-side. Alternative (rejected): keep the unit variant and rewrite doc §2.1/§3
-to "payload omitted for `room.leave`" — more doc surgery, and the
-"payload always present" rule is nicer for clients. Either way, update
-`tests/network_protocol.rs::leave_wire_shape_matches_the_frozen_types`,
-which pins today's behavior with the divergence marked.
+`ClientCommand::LeaveRoom` in `backend/src/protocol/client_message.rs` is the
+zero-field **struct variant** (`LeaveRoom {}`), not a unit variant. Verified
+against the frozen types: it serializes exactly
+`{"type":"room.leave","payload":{}}` and deserializes `"payload": {}` — the
+payload is `{}` in both directions, matching `docs/protocol-v1.md` §2.1/§3
+(payload required, `room.leave | {}`) and F3's `EmptyPayload` in
+`frontend/src/types/protocol.ts`. All 15 tests green on the current tree
+(`backend/src/protocol/mod.rs`'s `every_client_command_round_trips`
+constructs `LeaveRoom {}`); when B3's `tests/network_protocol.rs` lands,
+`leave_wire_shape_matches_the_frozen_types` pins this agreed shape (doc 03).

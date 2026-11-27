@@ -10,8 +10,8 @@
 | File | Store | Holds | Notable fields |
 |---|---|---|---|
 | `src/store/connection-store.ts` | `connectionStore` | transport status only | `status` (enum from doc 02 §5), `attempts` (backoff attempt count), `lastError` (last protocol/user-facing error) |
-| `src/store/room-store.ts` | `roomStore` | room + identity | `room_code`, `players` (`PlayerPublic[]`), `status` (`RoomStatus`), `myColor` (`PlayerColor \| null`), `playerId`, `roomState` — plus action state: `loading`, `error` |
-| `src/store/game-store.ts` | `gameStore` | the authoritative game | `revision`, `snapshot` (the `GameSnapshot` fields, or the snapshot itself — pick one shape and document it), `pendingMove`, `lastError` |
+| `src/store/room-store.ts` | `roomStore` | room + identity | `room_code`, `players` (`PlayerPublic[]`), `status` (`RoomStatus`), `yourColor` (`PlayerColor \| null`), `playerId`, `roomState` — plus action state: `loading`, `error` |
+| `src/store/game-store.ts` | `gameStore` | the authoritative game | `revision`, `snapshot` (the `GameSnapshot` fields, or the snapshot itself — pick one shape and document it), `pending`, `lastError` |
 
 > Consolidation note: the previous `README.md` (§6) proposed a fourth,
 > `session-store.ts` (`yourColor`, `playerId`). This doc folds those into
@@ -76,18 +76,18 @@ doc 02 §7).
 
 ## 4. The pending-move pattern (RULES.md §4: never optimistic)
 
-1. `submitMove(from, to, promotion)` → set `pendingMove = { from, to,
+1. `submitMove(from, to, promotion)` → set `pending = { from, to,
    promotion }` in `gameStore`, send the `game.move` command (doc 02 §3).
    **Do not touch `snapshot.fen`.**
 2. On `game.state` (guard passed) → apply the new snapshot atomically
-   **and** clear `pendingMove` in the same `set()`.
-3. On `game.move_rejected` → clear `pendingMove`, set the safe error
+   **and** clear `pending` in the same `set()`.
+3. On `game.move_rejected` → clear `pending`, set the safe error
    (`payload.error` + `payload.message`), and if `payload.snapshot` is
    present apply it under the revision guard.
-4. On resume (`session.ready`) → clear `pendingMove` (the snapshot is
+4. On resume (`session.ready`) → clear `pending` (the snapshot is
    the arbiter: the move landed or it never happened).
 5. Duplicate submissions: ignore move/action button presses while
-   `pendingMove` is set (screens disable, service double-guards).
+   `pending` is set (screens disable, service double-guards).
 
 Do not blindly re-send a move after a timeout — the server dedups by
 command id (B3 doc 02 §5.3, D1) but the safe client reconciles via
@@ -95,17 +95,18 @@ resume + full snapshot first.
 
 ## 5. The hooks (`src/hooks/`) — frozen names
 
-**The names below are already referenced by F1's and F4's READMEs —
-they are frozen, not a proposal.** F4 §3: *"All data comes from F3's
-hooks: `useGameState()`, `useRoomState()`, `useRoomActions()`,
-`useConnection()` (names frozen with F3)"*. F1 §6: *"You consume exactly
-these"* (`useRoomActions`, `useRoomState`).
+**The names below are already referenced by F1's and F4's docs —
+they are frozen, not a proposal.** F4's
+`src/screens/game/01-screen-composition.md` §6 wires exactly these hooks
+(`useGameState()`, `useRoomState()`, `useRoomActions()`, `useConnection()`).
+F1's `src/screens/lobby/04-acceptance.md` §2 pins the same names
+(`useRoomActions`, `useRoomState`).
 
 | Frozen hook | Returns | Consumed by |
 |---|---|---|
 | `useConnection()` | `connectionStore` slice: `status`, `attempts`, `lastError` — for banners/disabled states | F1 (waiting room), F4 (connection banner) |
-| `useRoomState()` | `{ roomCode, players, status, myColor, connection }` (F1's README pins `roomCode, players, status, connection`; camelCase display names mapping `room_code` etc.) | F1 (waiting room), F4 (panels) |
-| `useGameState()` | the snapshot fields + `pendingMove` (+ `revision` if F4 needs it) | F4 (board/turn/history/result) |
+| `useRoomState()` | `{ roomCode, players, status, yourColor, connection }` (F1's `04-acceptance.md` §2 pins `roomCode, players, status, connection`; camelCase display names mapping `room_code` etc.) | F1 (waiting room), F4 (panels) |
+| `useGameState()` | `{ snapshot, pending }` — the whole `GameSnapshot` (+ `revision` if F4 needs it) | F4 (board/turn/history/result) |
 | `useRoomActions()` | `createRoom, joinRoom, submitMove, offerDraw, acceptDraw, resign, rematch, leaveRoom` — each sets loading/error and returns a promise where a reply is expected | F1 (create/join), F4 (controls), F2 via F4 |
 
 Reconciliation flag (agreed direction, confirm on Day 1): an earlier
@@ -178,7 +179,7 @@ interface PendingMove { from: string; to: string; promotion: Promotion | null; }
 interface GameStore {
   revision: number;
   snapshot: GameSnapshot | null;        // null until the first game.state
-  pendingMove: PendingMove | null;
+  pending: PendingMove | null;
   // TODO: applySnapshot(envelopeRevision, snapshot) — atomic set + guard (§3);
   //       clearPending(), rejectPending(error, snapshot | null) (§4).
 }

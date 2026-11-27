@@ -33,7 +33,7 @@ game-route (src/app/game.tsx)
     ├── GameHeader                  // room code + leave action
     ├── PlayerInfo  (opponent)      // nickname, color, presence dot, active-turn ring
     ├── TurnIndicator               // "Your move" / "Waiting for opponent…" / check
-    ├── ChessBoard   (F2's)         // snapshot props + onMove → F3 action
+    ├── ChessBoard   (F2's)         // snapshot props + onMoveSubmit → F3 action
     ├── PlayerInfo  (you)           // same component, your seat
     ├── MoveHistory                  // move_history SAN strings, newest visible
     ├── GameActions                  // offer/accept draw · resign · rematch
@@ -60,7 +60,6 @@ src/screens/game/
 ├── game-result-modal.tsx
 ├── result-reasons.ts          # PURE: GameResult → friendly text (doc 02 §4)
 ├── error-messages.ts           # PURE: ErrorCode → friendly text (doc 02 §5)
-├── check-square.ts             # PURE: fen → king square (rendering only, §4.2)
 └── game-screen.dev.tsx         # dev-only fixture variant (doc 04 §1) — must NOT ship
 ```
 
@@ -111,47 +110,47 @@ F2's contract (`src/components/chess/README.md` §4) — wire to these names
 exactly; changes go through a PR with F2:
 
 ```tsx
-type ChessBoardProps = {
-  fen: string;                       // authoritative position (from F3 store)
-  orientation: "white" | "black";    // local player at the bottom
-  legalMoves: string[];              // UCI-style from server, e.g. ["e2e4", "e7e8q"]
-  lastMove: { from: string; to: string } | null;
-  checkSquare: string | null;        // e.g. "e1" when in check (derive from FEN/status)
-  disabled: boolean;                 // not your turn / disconnected / pending
-  onMove: (move: { from: string; to: string; promotion?: "q" | "r" | "b" | "n" }) => void;
-};
+interface BoardMove { from: string; to: string; promotion: Promotion | null; }
+interface ChessBoardProps {
+  snapshot: GameSnapshot;          // whole snapshot from F3's useGameState
+  orientation: PlayerColor;        // local player's color (yourColor)
+  disabled?: boolean;              // F4's kill-switch (pending/disconnected/finished)
+  onMoveSubmit: (move: BoardMove) => void;
+}
 ```
 
+(`GameSnapshot`, `PlayerColor`, `Promotion` come from `@/types/protocol`. The
+component is `ChessBoard`; `BoardMove.promotion` is ALWAYS present —
+`Promotion | null`, never optional.)
+
 > ⚠️ **Name mismatch to be aware of (flagged):** your original brief (TABLE 5)
-> says "`<Board>`" and the team's planning notes say `onMoveSubmit` /
-> "snapshot + local color". **F2's frozen contract is the component
-> `ChessBoard` with the callback prop `onMove`** — that is what you import
-> and wire. If F2 renames anything, it's a PR, not a silent change.
+> says "`<Board>`" with flat FEN/legal-move props. **F2's frozen contract is
+> the component `ChessBoard` taking the whole `snapshot` plus `orientation`,
+> reporting moves through the callback `onMoveSubmit`** (the team's planning
+> notes' "snapshot + local color" shape) — that is what you import and wire.
+> If F2 renames anything, it's a PR, not a silent change.
 
-### 4.1 Snapshot → props mapping (do this in ONE helper, not scattered)
+### 4.1 Snapshot → props mapping (do this in ONE place, not scattered)
 
-`useGameState()` gives you the current `GameSnapshot` fields plus `pending`
-(F3's README §6/§7). Map them once:
+`useGameState()` gives you the whole `GameSnapshot` plus `pending` (F3's doc
+03 §5). Wire them once:
 
 | F2 prop | Source | Notes |
 |---|---|---|
-| `fen` | `snapshot.fen` | verbatim, authoritative |
+| `snapshot` | `snapshot` from `useGameState()` | verbatim, authoritative — the board reads `fen`, `legal_moves`, `last_move`, `game_status` from it itself; legality stays server-only |
 | `orientation` | `yourColor` from `useRoomState()` | your color at the bottom |
-| `legalMoves` | `snapshot.legal_moves` | UCI-style, server only — never filter/compute legality yourself |
-| `lastMove` | `snapshot.last_move ? { from: snapshot.last_move.from, to: snapshot.last_move.to } : null` | F2 wants `{from,to}`; drop the `san` field |
-| `checkSquare` | derived: when `snapshot.game_status === "check"`, the side-to-move's king square parsed from `fen` | see §4.2 — rendering support only |
 | `disabled` | `pending \|\| turn !== yourColor \|\| connectionLost \|\| gameIsOver` | see doc 03 §5 |
-| `onMove` | `{ from, to, promotion? } => sendMove(from, to, promotion ?? null)` | straight into F3's action; F3 owns `expected_revision` |
+| `onMoveSubmit` | `(move: BoardMove) => submitMove(move.from, move.to, move.promotion)` | straight into F3's action; F3 owns `expected_revision` |
 
-### 4.2 `checkSquare` — pure rendering derivation (NOT rule validation)
+### 4.2 Check highlighting — internal to F2's board
 
-The snapshot has no king-square field; F2's contract asks you to derive it.
-Write a tiny PURE helper `check-square.ts`: when
-`game_status === "check"`, parse `fen`'s board part and return the square of
-the king whose turn it is (e.g. `"e1"`), else `null`. This is parsing for
-**rendering only** (same category as F2's own `fen-board.ts`) — it must never
-decide legality, results, or turn. `game_status: "check"` itself comes from
-the server.
+The snapshot has no king-square field, and F2's contract takes the whole
+`snapshot`: the board derives the checked king's square itself from
+`snapshot.fen` when `game_status === "check"` (F2's doc 02 §3 — board math,
+not rules) and renders the check highlight. You do NOT pass (or derive) a
+`checkSquare` prop on F4's side — no `check-square.ts` helper is needed.
+`game_status: "check"` itself comes from the server; it is all you need for
+the "Check!" turn-indicator state (§5).
 
 ## 5. Player info bars, turn indicator, history
 
@@ -184,24 +183,24 @@ the server.
 
 ## 6. The screen's data wiring — F3's hooks (exact names)
 
-F3's public API (`src/services/README.md` §7 — names proposed to be frozen
+F3's public API (`src/services/03-stores-and-hooks.md` §5 — names frozen
 with F1/F4; **these are the names you wire to**):
 
 ```ts
-const { sendMove, offerDraw, acceptDraw, resign, rematch, leaveRoom } = useRoomActions();
-// also: createRoom, joinRoom, resumeRoom — lobby-side (F1's); you use the game ones
-const { roomCode, players, status, drawOffer, yourColor } = useRoomState();
-const { snapshot, pending } = useGameState();      // snapshot = current GameSnapshot fields
+const { submitMove, offerDraw, acceptDraw, resign, rematch, leaveRoom } = useRoomActions();
+// also: createRoom, joinRoom — lobby-side (F1's); you use the game ones
+const { roomCode, players, status, yourColor } = useRoomState();
+const { snapshot, pending } = useGameState();      // snapshot = the whole GameSnapshot
 const connection = useConnection();                // "connecting" | "connected" | "reconnecting" | "disconnected"
 ```
 
 > ⚠️ **Name mismatches (flagged, use the list above):**
 > - Your original brief (TABLE 6) proposes `makeMove(…)` and
->   `requestRematch()` — F3's proposed API is **`sendMove(…)`** and
+>   `requestRematch()` — F3's frozen API is **`submitMove(…)`** and
 >   **`rematch()`**.
 > - Planning notes also mention `useGameSnapshot`, `useRoom`,
->   `useConnectionStatus`, `useSendCommand` — F3's README §7 actually
->   proposes **`useGameState`, `useRoomState`, `useRoomActions`,
+>   `useConnectionStatus`, `useSendCommand` — F3's doc 03 §5 actually
+>   freezes **`useGameState`, `useRoomState`, `useRoomActions`,
 >   `useConnection`**. Do not invent alternatives; if F3 ships different
 >   final names, update this doc + your wiring in the same PR.
 > - `src/hooks/` does not exist yet (only F3's README) — build against the
@@ -210,9 +209,10 @@ const connection = useConnection();                // "connecting" | "connected"
 Rules for using them (RULES.md §4, F3's README §5–6):
 
 - Screens **never** call `wsService` / stores directly — hooks only.
-- F3's actions own `expected_revision` and command IDs. `sendMove(from, to,
-  promotion ?? null)` — pass the user's choice through, including `null`
-  promotions; F2 may omit `promotion` when not promoting.
+- F3's actions own `expected_revision` and command IDs. `submitMove(from, to,
+  promotion)` — pass the user's choice through, including `null` promotions;
+  `BoardMove.promotion` is always present (`Promotion | null`), never
+  omitted.
 - Subscribe with **narrow selectors** (e.g. `useGameState((s) => s.pending)`),
   not whole-store reads, so the board re-renders only when its inputs change.
 - `players[].connected` in the STORE is fresher than the last full snapshot
@@ -241,7 +241,7 @@ import { PlayerInfo } from "./player-info";
 import { TurnIndicator } from "./turn-indicator";
 
 export function GameScreen({ roomCode }: { roomCode: string }) {
-  const { sendMove, offerDraw, acceptDraw, resign, rematch, leaveRoom } = useRoomActions();
+  const { submitMove, offerDraw, acceptDraw, resign, rematch, leaveRoom } = useRoomActions();
   const { players, yourColor } = useRoomState();
   const { snapshot, pending } = useGameState();
   const connection = useConnection();
@@ -252,7 +252,6 @@ export function GameScreen({ roomCode }: { roomCode: string }) {
   // TODO: gameIsOver = snapshot.result !== null
   // TODO: boardDisabled = pending || snapshot.turn !== yourColor
   //                            || connection === "disconnected" || gameIsOver
-  // TODO: checkSquare derivation (doc 01 §4.2)
   // TODO: presence/turn wiring into PlayerInfo (doc 01 §5)
   // TODO: banners: DrawOfferBanner when snapshot.draw_offer !== null and
   //       it's the opponent's; ConnectionBanner from connection (doc 03)

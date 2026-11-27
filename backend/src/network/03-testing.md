@@ -49,7 +49,7 @@ why the test exists):
 | `move_command_always_carries_promotion` | `promotion` is always present (null when absent) — F3 reads it unconditionally |
 | `server_error_envelope_has_stable_code_and_safe_message` | `server.error` shape: SCREAMING_SNAKE code, safe message, no revision |
 | `session_ready_carries_the_full_snapshot` | Resume replaces the client's whole state atomically |
-| `leave_wire_shape_matches_the_frozen_types` | Pins today's `room.leave` wire shape **and marks the D4 divergence** (doc 02 §9) — flip it when the freeze review lands |
+| `leave_wire_shape_matches_the_frozen_types` | Pins the agreed `room.leave` wire shape: always `"payload": {}` in both directions (D4 — resolved in the base, doc 02 §9) |
 
 The file, complete (verified green against the frozen contracts):
 
@@ -373,22 +373,21 @@ fn leave_wire_shape_matches_the_frozen_types() {
     let leave = ClientEnvelope {
         v: PROTOCOL_VERSION,
         id: "x".into(),
-        command: ClientCommand::LeaveRoom,
+        command: ClientCommand::LeaveRoom {},
     };
     let value = serde_json::to_value(&leave).unwrap();
     assert_eq!(value["type"], "room.leave");
-    assert!(value.get("payload").is_none(), "unit variant omits payload: {value}");
+    assert_eq!(value["payload"], serde_json::json!({}), "payload is always {}: {value}");
 
-    // Accepted forms today: payload key absent, or null.
-    let absent = r#"{ "v": 1, "id": "i", "type": "room.leave" }"#;
-    assert!(parse_command(absent).is_ok());
-    let null = r#"{ "v": 1, "id": "i", "type": "room.leave", "payload": null }"#;
-    assert!(parse_command(null).is_ok());
-
-    // The `{}` form that the DOC and the TS types specify is REJECTED by
-    // today's Rust types — this assertion is the divergence marker.
+    // The agreed shape (D4, resolved in the base): "payload": {} in both
+    // directions. Verified against the frozen types: {} parses; null and
+    // absent are rejected.
     let braces = r#"{ "v": 1, "id": "i", "type": "room.leave", "payload": {} }"#;
-    assert_eq!(parse_command(braces), Err(GateRejection::InvalidPayload));
+    assert!(parse_command(braces).is_ok());
+    let null = r#"{ "v": 1, "id": "i", "type": "room.leave", "payload": null }"#;
+    assert_eq!(parse_command(null), Err(GateRejection::InvalidPayload));
+    let absent = r#"{ "v": 1, "id": "i", "type": "room.leave" }"#;
+    assert_eq!(parse_command(absent), Err(GateRejection::InvalidPayload));
 }
 
 /// `server.error` shape: stable SCREAMING_SNAKE code in the payload, safe

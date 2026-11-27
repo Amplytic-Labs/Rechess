@@ -57,8 +57,8 @@ inside a dev harness with pure fixture props (see `03-manual-testing.md`).
 
 ## 4. Prop contract (the contract F4's README points at)
 
-> F4's `src/screens/game/README.md` §3 references "F2's ChessBoard props
-> contract: `src/components/chess/README.md` §4" — that is this section.
+> F4's `src/screens/game/01-screen-composition.md` §4 references "F2's
+> contract (`src/components/chess/README.md` §4)" — that is this section.
 > **The exact final signature is agreed with F4** (they compose the game
 > screen and own the screen-side wiring). The shape below is the
 > recommended default: confirm it with F4 on Day 1, then freeze it. Any
@@ -116,10 +116,6 @@ files):**
   tests, and tokens in `tailwind.config.js`. All of that is **superseded**:
   uniwind 1.14 + `global.css` tokens, the snapshot-based contract above, and
   no test runner.
-- F4's README §6 mentions `npx jest game` — stale: RULES.md §5 says the
-  frontend has **no unit-test runner by design** (typecheck + lint + manual
-  checklists). Point it out to F4 so they can fix their README; do not add
-  jest yourself.
 - Your original brief (07_F2_Chessboard_Interaction.md) suggests
   `checkedKingSquare?: string` as a prop and an `onMove(from, to, promotion?)`
   callback. This doc set instead derives the king square from the FEN when
