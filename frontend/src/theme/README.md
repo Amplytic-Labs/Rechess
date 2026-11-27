@@ -27,5 +27,5 @@
 | `foreground` / `muted-foreground` | primary / secondary text |
 | `primary` / `primary-foreground` | brand actions |
 | `border` | dividers, outlines |
-| `destructive` / `success` | resign / confirm semantics |
-| `board-light` / `board-dark` / `move-target` / `last-move` / `check` | chess board (F2) |
+| `destructive` / `destructive-foreground` / `success` | resign / confirm semantics |
+| `board-light` / `board-dark` / `move-target` / `last-move` / `check` / `piece-white` / `piece-black` | chess board (F2) |

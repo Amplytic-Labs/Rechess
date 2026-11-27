@@ -1,108 +1,126 @@
 # 02 — Routes and navigation
 
-## 1. Route files (yours — keep them THIN)
+## 1. The two routes (FIXED)
 
-RULES.md §3: route files in `src/app/*.tsx` stay thin — they import a screen
-component from `src/screens/**` and render it. UI and state live in the
-screen components, so they stay reviewable and router-independent.
+The route set is **frozen** — do not add, rename or remove routes. Both are
+already scaffolded as placeholders in `src/app/`:
 
-| Route file | Renders | Status |
-|---|---|---|
-| `src/app/index.tsx` | `HomeScreen` from `@/screens/lobby/home-screen` | exists — **replace the placeholder body** |
-| `src/app/create-room.tsx` | `CreateRoomScreen` from `@/screens/lobby/create-room-screen` | you create |
-| `src/app/join-room.tsx` | `JoinRoomScreen` from `@/screens/lobby/join-room-screen` | you create |
-| `src/app/waiting-room.tsx` | `WaitingRoomScreen` from `@/screens/lobby/waiting-room-screen` | you create |
-| `src/app/game.tsx` (or F4's chosen name) | F4's game screen | **F4's file — do not create/edit** |
+| Route | Route file | Renders | Status |
+|---|---|---|---|
+| `/` | `src/app/page.tsx` | `HomeScreen` from `@/screens/lobby/home-screen` (**yours**) | placeholder — replace the body |
+| `/game/[roomCode]` | `src/app/game/[roomCode]/page.tsx` | F4's game composition; while room `status === "waiting"` it renders F1's `WaitingRoom` from `@/screens/lobby/waiting-room` | **F4's file — do not edit** |
+
+Why only two: the earlier five-screen plan (home / create / join / waiting /
+game as separate routes) collapsed in the web migration — create + join
+became sections of the home screen, and waiting / game / result are one URL
+driven by the room + snapshot status the server owns. A shareable,
+refresh-safe game URL is the point: `/game/TESTCODE1` survives a reload or a
+direct open because F3's service resumes the session from its storage.
+
+RULES.md §3: route files stay **thin** — they import a screen component from
+`src/screens/**` and render it. UI and state live in the screen components,
+so they stay reviewable and router-independent.
 
 The thin-wrapper pattern (exact):
 
 ```tsx
-// src/app/create-room.tsx
-import { CreateRoomScreen } from "@/screens/lobby/create-room-screen";
+// src/app/page.tsx
+import { HomeScreen } from "@/screens/lobby/home-screen";
 
-export default function CreateRoomRoute() {
-  return <CreateRoomScreen />;
+export default function HomePage() {
+  return <HomeScreen />;
 }
 ```
 
-`src/app/index.tsx` keeps its `export default function` shape — swap its
-placeholder body for `<HomeScreen />` from `@/screens/lobby/home-screen`.
-Import `router`, `Link`, `useLocalSearchParams` from `expo-router` only —
-`react-navigation` imports are banned by ESLint.
+The screen component carries `"use client"` — the route file itself stays a
+plain server component that only imports and renders it. Your home route
+takes no params, so there is nothing else to do in it.
 
-`src/app/_layout.tsx` is done (GestureHandlerRootView → SafeAreaProvider →
-HeroUINativeProvider → Stack). You normally need **no** layout change: unlisted
-routes are rendered by the default `<Stack />`. If you want per-route header
-titles, add `<Stack.Screen name="…" options={{…}} />` entries there — that
-file is shared foundation, so make it a tiny coordinated PR, don't freestyle.
-Screens may also draw their own headers; pick one and keep it consistent.
+`src/app/layout.tsx` is done (root layout, imports `global.css`, paints
+`bg-background text-foreground`). You normally need **no** layout change. If
+you genuinely need one (e.g. page metadata), it is shared foundation — make
+it a tiny coordinated PR, don't freestyle.
 
 ## 2. Navigation flow
 
 ```
-                 ┌──────────────┐
-                 │  /  (home)   │
-                 └──────┬───────┘
-           "Create room"│ "Join room"
-          ┌─────────────┴──────────────┐
-          ▼                            ▼
- ┌────────────────┐          ┌────────────────┐
- │ /create-room   │          │ /join-room     │
- │ nickname       │          │ code+nickname  │
- └───────┬────────┘          └───────┬────────┘
-   createRoom() ok             joinRoom() ok
-          └───────────┬────────────────┘
-                      ▼
-            ┌───────────────────┐   both seats filled
-            │ /waiting-room     │ ──(room status "active",
-            │ ?roomCode=XXXXXXXX│    server-authoritative)
-            └─────────┬─────────┘ ────────────┐
-                      │ back = leave room    ▼
-                      ▼              ┌─────────────────┐
-                back to /            │ /game (F4)     │
-                                     │ ?roomCode=XXXX │
-                                     └─────────────────┘
+   ┌──────────────────────────────────┐
+   │  /                (home screen)  │
+   │  nickname + create / join        │
+   └─────────────────┬────────────────┘
+                     │  createRoom() / joinRoom() ok
+                     ▼
+   ┌──────────────────────────────────────────────┐
+   │  /game/[roomCode]                            │
+   │    room status "waiting"  → WaitingRoom  (F1)│
+   │    room status "active"   → game UI      (F4)│
+   │    finished               → result view  (F4)│
+   └──────────────────────────────────────────────┘
+    ▲  reload / open the URL directly → F3's service resumes
 ```
 
-## 3. Push, params, and what may never be a param
+No navigation ever happens waiting → game → result: the URL stays
+`/game/[roomCode]` and the composition switches on server-owned state.
+
+## 3. Link, useRouter, useParams — and what may never be in a URL
 
 ```tsx
-import { router, useLocalSearchParams } from "expo-router";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 
-// navigate
-router.push("/create-room");
-router.push({ pathname: "/waiting-room", params: { roomCode: "TESTCODE1" } });
+// programmatic navigation (after createRoom/joinRoom resolves, or Leave)
+const router = useRouter();
+router.push(`/game/${roomCode}`);
+router.push("/");
 
-// read typed params (in the screen component)
-const { roomCode } = useLocalSearchParams<{ roomCode: string }>();
+// declarative links (e.g. a "back to home" text link)
+<Link href="/">…</Link>
+
+// read the room code inside a client screen component
+const { roomCode } = useParams<{ roomCode: string }>();
 ```
 
-- **Room code in params: OK.** It is a public identifier, not a credential.
-- **`player_token` in params: NEVER** (RULES.md §3, brief §2). It never
-  appears in route params, deep links, or logs; F3 keeps it in
-  `expo-secure-store` and handles resume. Your screens never even hold it.
-- Prefer `router.replace` **into** the game route (waiting → game is a
-  forward transition — you don't want "back" from the game returning to a
-  stale waiting room). Use `router.push` for home → create/join.
-- Don't pass anything else — nickname lives in the store/F3's action call,
-  not the URL.
+- Import `Link` from `next/link`, `useRouter`/`useParams` from
+  `next/navigation` — never `react-router` or similar (RULES.md §3).
+- `useRouter().push` after an action resolves (create/join success, leave
+  confirm); `Link` for static navigation targets.
+- **Room code in the URL path: OK.** It is a public identifier, not a
+  credential — that is what makes the game URL shareable. Uppercase it before
+  navigating (`/game/TESTCODE1`).
+- **`player_token` in a URL: NEVER** (RULES.md §3, brief §2). It never
+  appears in paths, query strings, links or logs; F3's service keeps it in
+  F3's storage module and resumes the session after navigation or reload.
+  Your screens never even hold it.
+- Don't put anything else in the URL — the nickname lives in the
+  store/F3's action call, not the query string.
 
-## 4. Back handling (your choices to implement)
+## 4. Leaving the room and the back button (your choices to implement)
 
-| From | Back button (header/Android hardware) does | Rationale |
+The web has no controlled hardware back — define what the in-app
+affordances do:
+
+| From | What the user does | What happens |
 |---|---|---|
-| `/create-room`, `/join-room` | plain back to `/` (default `router.back()`) | no state to protect; just dismiss the keyboard/form |
-| `/waiting-room` | confirm-then-leave: alert ("Leave the room? The other player will be notified.") → on confirm call F3's `leaveRoom()` then `router.dismissTo("/")`/`router.back()` | leaving is a real action — the seat frees up server-side |
-| into `/game` | `router.replace`, so game back-navigation is F4's problem to define | keep one nav owner per screen |
+| `/` (home) | nothing to leave | — |
+| `/game/[roomCode]`, waiting | explicit **Leave** button (confirm inside a `Dialog`) | call F3's `leaveRoom()` (the seat frees server-side), then `router.push("/")` |
+| `/game/[roomCode]`, any state | browser back / reload / open the URL directly | history navigation only — the room keeps running server-side; returning to `/game/TESTCODE1` (or reloading it) resumes via F3's service. No `beforeunload` blockers in the MVP |
+| `/game/[roomCode]`, active/finished | in-game leave/resign | **F4's** call (`src/screens/game/02-controls-and-results.md`) |
 
-Keep this table in the screen components as a short comment so reviewers see
-the intent. If you need a blocker (disable hardware back), use Expo Router's
-documented back-handler APIs — check the current SDK 58 docs
-(https://docs.expo.dev/versions/v58.0.0/) before writing anything.
+Reload/direct-open with a stale or invalid stored session ⇒ F3's service
+surfaces the error (`INVALID_TOKEN` etc.) and the UI returns to `/` with a
+friendly message (`docs/protocol-v1.md` §8) — coordinate the exact toast
+placement with F3; the home screen hosts it.
+
+Keep this table as a short comment in the screen components so reviewers see
+the intent.
 
 ## 5. Keeping routes thin (checklist)
 
 - Zero styling in route files — not even `className`.
 - Zero state/logic in route files; params are read **inside the screen
-  component** with `useLocalSearchParams`, not forwarded as props.
+  component** with `useParams`, not forwarded as props. (For routes with
+  params — F4's game route — passing the awaited `params` prop down instead
+  is equally valid; that is F4's choice. Your home route has no params.)
 - One default export per route file, importing exactly one screen component.
+- All interactivity (`"use client"`) lives in `src/screens/**`, never in the
+  route file.

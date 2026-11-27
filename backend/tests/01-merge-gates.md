@@ -206,14 +206,17 @@ enforcer at merge time. Block the merge (or request the missing piece) if:
 
 ## 9. Frontend gates (separate, same authority)
 
-Frontend PRs (F1–F4) are gated by their own commands — there is **no frontend
-test runner by design** (see `frontend/RULES.md` §5); UI quality is verified by
-manual checklists in the module READMEs:
+Frontend PRs (F1–F4) are gated by their own commands (`frontend/RULES.md`
+§5): typecheck, lint, test (vitest — wire-contract and store unit tests) and
+build. UI quality is additionally verified by manual checklists in the
+module READMEs:
 
 ```bash
 cd frontend
 npm run typecheck   # tsc --noEmit — zero errors (also compiles protocol fixtures)
 npm run lint        # eslint — zero errors/warnings
+npm run test        # vitest — wire-contract and store unit tests
+npm run build       # production build (what B4 ships)
 ```
 
 Your job is that these run in CI on the same PR so drift is visible — the job

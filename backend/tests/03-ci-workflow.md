@@ -115,12 +115,12 @@ Design notes (why it looks like this):
 
 ## 3. Frontend job (add later, same repo, separate workflow)
 
-The frontend has **no test runner by design** (`frontend/RULES.md` §5 — UI is
-verified by manual checklists; the wire contract is proven by
-`cargo test protocol_contract.rs` on the backend and by
-`npm run typecheck` compiling `protocol.fixtures.ts`). The job runs the two
-frontend gates on node 22. Create it as `.github/workflows/frontend-ci.yml`
-when F3/F4 start merging:
+The frontend gate set is four commands (`frontend/RULES.md` §5 — UI is
+additionally verified by manual checklists; the wire contract is proven by
+`cargo test protocol_contract.rs` on the backend, by `npm run typecheck`
+compiling `protocol.fixtures.ts`, and by vitest in `protocol.test.ts`). The
+job runs all four frontend gates on node 22. Create it as
+`.github/workflows/frontend-ci.yml` when F3/F4 start merging:
 
 ```yaml
 name: frontend-ci
@@ -152,13 +152,17 @@ jobs:
         run: npm run typecheck
       - name: lint
         run: npm run lint
+      - name: test             # vitest — wire-contract and store unit tests
+        run: npm run test
+      - name: build            # production build (what B4 ships)
+        run: npm run build
 ```
 
 Coordinate with F3/F4 so a missing script name in `frontend/package.json`
 fails loudly (setup-node runs `npm ci` against the committed lockfile). The
-goal from your brief: mobile typecheck/lint failures are **visible in the
-shared repository**, even as a separate job — never let frontend breakage
-hide behind a green backend check.
+goal from your brief: frontend typecheck/lint/test/build failures are
+**visible in the shared repository**, even as a separate job — never let
+frontend breakage hide behind a green backend check.
 
 ## 4. Branch protection recommendations (repo settings)
 

@@ -1,59 +1,91 @@
 # 02 — The WebSocket service (`src/services/websocket.ts`)
 
 > One connection per app. It is a **module-level singleton service, not a
-> hook** — hooks (doc 03) wrap it; screens never see it. B3's plan
-> (`backend/src/network/01-axum-websocket-guide.md`, `02-protocol-implementation.md`)
-> is the server side of everything here; your client must match it.
+> hook** — hooks (doc 03) wrap it; screens never see it. It runs in the
+> **browser**, imported (directly or via stores/hooks) from client
+> components only; there are no Next API routes or server actions for
+> game data — the Rust WebSocket server is the only data source
+> (RULES.md §2). B3's plan (`backend/src/network/01-axum-websocket-guide.md`,
+> `02-protocol-implementation.md`) is the server side of everything here;
+> your client must match it.
 
 ## 1. The base that already exists (don't rebuild it)
 
-- No socket library needed: React Native ships a global `WebSocket`
-  class, callback-based (`onopen`, `onmessage`, `onclose`, `onerror`,
-  `close()`, `send(string)`). `zustand ~5.1.0`, `expo-secure-store ~58.0.3`,
-  `expo-crypto ~58.0.9`, `expo-constants ~58.0.16` are installed and
-  SDK-matched (verify in `frontend/package.json` before adding anything).
-- The wire types are done: `src/types/protocol.ts` (doc 01).
+- **No socket library**: every modern browser ships a global `WebSocket`
+  class — callback-based (`onopen`, `onmessage`, `onclose`, `onerror`,
+  `send(string)`, `close(code?, reason?)`, plus `readyState`). No
+  dependency, no polyfill, no team PR (RULES.md §2 makes new
+  dependencies team decisions — none are needed here).
+- `zustand ~5.1.0` is installed and that is the whole runtime surface
+  (verify `frontend/package.json` before adding anything). The wire
+  types are done: `src/types/protocol.ts` (doc 01).
+- The browser's `CloseEvent` carries `code` and `reason` — you need them
+  to tell the accepted-`room.leave` close (1000, "left room") from
+  errors (§8). A failed connection fires `onerror` and then `onclose` —
+  make `onclose` the single authoritative transition point.
+- **Where this code runs**: client components are pre-rendered on the
+  server for the initial HTML, so your module's top level is ALSO
+  evaluated in Node during `npm run build` and the dev render pass.
+  Never touch `window`, `localStorage`, `WebSocket` or `document` at
+  module top level — open sockets and read storage only inside
+  functions called from effects/handlers, and guard any module-level
+  browser-event registration with `typeof window !== "undefined"`.
 
-## 2. Connection URL derivation
+## 2. The connection URL — the config module
 
-Single endpoint: `GET /ws` — `ws://<host>/ws` in dev, `wss://<host>/ws` in
-production (TLS at the reverse proxy). The server binds `0.0.0.0:3000` by
-default (`RECHESS_HOST`/`PORT` env vars, `backend/src/main.rs`).
+Single endpoint: `GET /ws` — `ws://localhost:3000/ws` in local dev,
+`wss://<host>/ws` in production (TLS at the reverse proxy, B4's
+deployment doc). The server binds `0.0.0.0:3000` by default
+(`RECHESS_HOST`/`PORT` env vars, `backend/src/main.rs`); `npm run dev`
+serves the app at `http://localhost:3001`.
 
-Use the `EXPO_PUBLIC_` env mechanism: variables prefixed `EXPO_PUBLIC_`
-in `.env` are **inlined into the bundle at build/start time** and read
-from `process.env` in client code. (If the team ever prefers config-file
-values, `expo-constants` — `Constants.expoConfig.extra` — is the
-alternative; `process.env.EXPO_PUBLIC_*` is the standard Expo way and
-needs no code changes.)
-
-```bash
-# frontend/.env  — NEVER commit it (check .gitignore; if it's missing, PR)
-EXPO_PUBLIC_API_URL=http://192.168.1.20:3000   # your machine's LAN IP in dev
-# production build: EXPO_PUBLIC_API_URL=https://chess.example.com
-```
-
-Derive the WS URL from it (never hardcode an IP in code):
+One small module owns the URL: `src/services/config.ts` — the ONLY code
+that reads the environment. It reads `NEXT_PUBLIC_API_URL` and defaults
+to `ws://localhost:3000/ws`, so same-machine local dev needs **no
+configuration at all**:
 
 ```ts
-// sketch
-function resolveWsUrl(): string {
-  const base = process.env.EXPO_PUBLIC_API_URL; // e.g. "http://192.168.1.20:3000"
-  if (!base) throw new Error("EXPO_PUBLIC_API_URL is not set — create frontend/.env");
-  const withWs = base.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
-  return `${withWs.replace(/\/$/, "")}/ws`;
+// src/services/config.ts — the ONLY module that reads the WS URL env
+const DEFAULT_WS_URL = "ws://localhost:3000/ws"; // same-machine local dev
+
+/** Resolve the WebSocket endpoint from NEXT_PUBLIC_API_URL. */
+export function resolveWsUrl(): string {
+  const raw = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (!raw) return DEFAULT_WS_URL;
+  // Accept either a full ws(s)://…/ws URL or an http(s) base URL.
+  const wsBase = raw
+    .replace(/^http:\/\//i, "ws://")
+    .replace(/^https:\/\//i, "wss://");
+  return wsBase.endsWith("/ws")
+    ? wsBase
+    : `${wsBase.replace(/\/+$/, "")}/ws`;
 }
+```
+
+Set it per developer in `frontend/.env.local` (gitignored — `.env*` is
+in `.gitignore`; never commit it):
+
+```bash
+# frontend/.env.local — gitignored, per machine
+# Same-machine local dev: NO entry needed (default ws://localhost:3000/ws).
+# Real phone/tablet on your LAN (same network as the backend):
+#   NEXT_PUBLIC_API_URL=ws://192.168.1.20:3000/ws
+# Production build: NEXT_PUBLIC_API_URL=wss://chess.example.com/ws
 ```
 
 Gotchas worth knowing now:
 
-- Inlined **at bundle time**: editing `.env` requires restarting
-  `expo start` (and a reload of the app) — it is not runtime config.
-- `localhost` from a phone means the phone itself. Use your LAN IP, and
-  make sure the phone and the dev machine are on the same network
-  (B4's runbook documents this too).
-- Production must be `https://` → `wss://`. Plain `ws://` to a public
-  host is a security bug (RULES.md §4, master plan §6).
+- `NEXT_PUBLIC_` variables are **inlined at build time** by Next.js —
+  editing `.env.local` requires restarting `npm run dev`. It is not
+  runtime config; the production value is baked in when B4 builds.
+- `localhost` in the browser really is the local machine — same-machine
+  dev just works. From a phone, `localhost` means the phone itself: use
+  the dev machine's LAN IP (and see the secure-context caveat in §3
+  before real-device testing over plain http).
+- Production must be `wss://` — plain `ws://` to a public host is a
+  security bug (RULES.md §4), and an `https://` page cannot open an
+  insecure `ws://` socket anyway (mixed-content blocking), so the
+  reverse proxy must terminate TLS.
 
 ## 3. The send path
 
@@ -76,10 +108,14 @@ Rules:
 - `v` is **always** `PROTOCOL_VERSION` (from `protocol.ts`). The server
   version-gates every frame: `v !== 1` ⇒ `server.error
   UNSUPPORTED_VERSION` and then the server closes (code 1008).
-- `id` is a fresh **UUID per command** from `expo-crypto`:
-  `import * as Crypto from "expo-crypto"; Crypto.randomUUID()`. The server
-  logs it and B2 plans dedup around it — never reuse an id, never send
-  without one.
+- `id` is a fresh UUID per command from the browser's global
+  `crypto.randomUUID()` — never reuse an id, never send without one;
+  the server logs it and B2 plans dedup around it. It is a
+  secure-context API: available on `localhost` and any `https://`
+  origin — plain-http LAN origins do not have it, so real-device
+  testing needs the dev server over HTTPS (doc 05 §2). Unit tests can
+  call it too (Node ≥ 19 provides the same global) or take an injected
+  id factory for determinism (doc 05 §1).
 - `expected_revision` on state-changing commands is read from
   `gameStore` at send time (doc 03) — never from a stale closure.
 - Send while disconnected must not crash: either reject the send and
@@ -99,8 +135,8 @@ Rules:
    malformed server data dies in ONE place instead of crashing screens.
 3. `switch` on `envelope.type` and route to your stores (doc 03):
    - `room.created` / `room.joined` — store room + identity, write the
-     token to SecureStore (doc 04), resolve the pending action's promise
-     so F1 can navigate.
+     token through the security module (doc 04), resolve the pending
+     action's promise so F1 can navigate to `/game/[roomCode]`.
    - `session.ready` — apply `payload.snapshot` as a full snapshot
      (atomic, doc 03 §3).
    - `game.state` — apply `payload` (it IS the `GameSnapshot`) under the
@@ -112,7 +148,7 @@ Rules:
    - `game.finished` — apply the final snapshot + result.
    - `server.error` — map `payload.error` to a friendly themed message
      (screen-facing state, never raw JSON); special-case `INVALID_TOKEN`
-     (resume failed — doc 04 §4).
+     (resume failed — doc 04 §5).
 4. The envelope `revision` (present only on `game.state`,
    `game.move_rejected`, `game.finished`) is the input to the atomic
    revision guard.
@@ -130,7 +166,7 @@ Rules:
 ```
 
 - `connecting` includes the socket handshake; `connected` from `onopen`.
-- Any non-user-initiated `onclose`/`onerror` while a room session exists
+- Any non-user-initiated `onclose` while a room session exists
   → `reconnecting` and schedule the backoff (§6). `disconnected` is
   terminal-ish: user-initiated (`disconnect()`, leave) or backoff
   exhausted/gave up.
@@ -174,12 +210,14 @@ generation is dropped. Same idea applies to pending action promises: a
 `createRoom` promise must reject (not hang forever) if its connection
 dies before the reply.
 
-## 6. Reconnect: exponential backoff + jitter
+## 6. Reconnect: capped exponential backoff + jitter
 
-- Base delay 1 s, doubling per attempt, **capped at 30 s**:
-  1 s → 2 s → 4 s → 8 s → 16 s → 30 s → 30 s …
-  (`docs/protocol-v1.md` §7 suggests 0.5 s → 30 s; 1 s base is fine —
-  the cap is what matters).
+- Base delay 0.5 s, doubling per attempt, **capped at 8 s**:
+  0.5 s → 1 s → 2 s → 4 s → 8 s → 8 s …
+  (`docs/protocol-v1.md` §7 illustrates capped exponential backoff +
+  jitter with "e.g. 0.5 s → 30 s"; this client caps tighter, at 8 s, for
+  a responsive browser game — within the spec's illustrative range. The
+  cap, not its exact value, is what matters.)
 - **Full jitter**: sleep `random(0, min(cap, base * 2^attempt))` before
   each retry. Jitter prevents synchronized reconnect stampedes after a
   server restart (100 rooms × clients all retrying on the same tick).
@@ -188,7 +226,7 @@ dies before the reply.
 - Stop retrying (go `disconnected`) when: the user left the room, the
   room is `finished` and retention ended, or the token is invalid
   (`INVALID_TOKEN` — §7). Never retry `room.leave` closes (§8).
-- **Watchdog**: do not wait passively for the OS to notice a dead NAT'd
+- **Watchdog**: do not wait passively for the OS to notice a dead
   socket. Rely on `onclose`/`onerror` first, but add your own timer — if
   nothing (no frame, no ping window) arrives for ~60 s while `connected`,
   force-close the socket and go to `reconnecting`. Server arithmetic
@@ -196,17 +234,48 @@ dies before the reply.
   pongs ⇒ the server-side detector fires within ~60–90 s of silence;
   your client should not be lazier than the server.
 
-## 7. The resume flow
+### Browser triggers (this replaces mobile background/foreground)
 
-On reconnect (or app foreground via `AppState` → `"active"`) when the app
-was in a room:
+`onclose`/`onerror` is not the only signal — the tab's own lifecycle
+gives you more, and each of these can fire while a socket is silently
+dead:
 
-1. Read `room_code` + `player_token` from SecureStore (doc 04).
-2. Send exactly:
+| Event | Meaning | Your action |
+|---|---|---|
+| `window` `online` | the browser regained network | if `reconnecting`: fire the next attempt immediately instead of sleeping out the remaining backoff delay |
+| `window` `offline` | network lost | keep the backoff schedule (do NOT hammer retries with no network); the status banner reflects offline; `online` above resumes |
+| `document` `visibilitychange` → `visible` | the user came back to the tab | if `reconnecting`: retry now. If `connected`: verify the socket is alive — a tab hidden long enough can hold a socket the network already dropped (the watchdog covers this too) |
+| `window` `pageshow` with `event.persisted` | restored from the back/forward cache | do not trust the old socket: verify or close + reconnect + resume (§7) |
+
+Register these listeners on first `connect()` (browser only — the
+`typeof window` guard from §1) and remove them in `disconnect()`. Two
+facts to internalize:
+
+- Browsers throttle timers in hidden tabs — a `setTimeout` can stretch
+  toward once per minute after ~5 minutes hidden (an open WebSocket
+  connection generally exempts the page from the harshest throttling in
+  Chromium, but do not rely on it). This is acceptable here: your
+  backoff caps at 8 s, and when the user returns, `visibilitychange`
+  fires an immediate retry. Keep the timers running — pausing retries
+  while hidden would burn B2's reconnect grace (~60 s), which is shorter
+  than aggressive throttling anyway.
+- These events are your safety net for the single-route flow: the game
+  lives at `/game/[roomCode]` for the whole session, so a returning user
+  must find a live session or a resume already in flight (§7).
+
+## 7. The resume flow (reconnect AND navigation)
+
+On any resume trigger — a reconnect attempt (§6), the tab becoming
+visible/online again with a dead socket, or **landing on
+`/game/[roomCode]`** — when a token for that room exists in storage:
+
+1. Read the `room_code` (from the URL or the bound session) and the
+   `player_token` through the security module (doc 04).
+2. Connect if not connected, then send exactly:
 
 ```json
 { "v": 1, "id": "<uuid>", "type": "session.resume",
-  "payload": { "room_code": "ABCD2345", "player_token": "<from SecureStore>" } }
+  "payload": { "room_code": "ABCD2345", "player_token": "<from storage>" } }
 ```
 
 3. `session.ready` (`SessionReadyPayload: { player_id, color, snapshot }`)
@@ -218,17 +287,39 @@ was in a room:
    (D5) the server follows it with a `game.state` carrying the envelope
    `revision` — that is where your `expected_revision` comes from.
 4. `server.error INVALID_TOKEN` ⇒ the session is gone: **clear the
-   stored credentials** (doc 04 §4), set a friendly "session expired"
+   stored credentials** (doc 04 §5), set a friendly "session expired"
    state, and let F1 navigate back to home. Do not loop on resume with a
    dead token.
 5. `ROOM_NOT_FOUND` on resume (server restarted / room expired): same
    treatment — clear credentials, home screen, friendly message.
 
+### Resume-on-navigation (the key client flow)
+
+The waiting room, the game and the result all live at the single route
+**`/game/[roomCode]`** (F4) — so arriving at that route is itself a
+resume trigger. The service derives the room code from the URL
+(`window.location.pathname`, `/game/<code>` — the same value F4 reads
+with `useParams()`) and runs this decision, entirely service-internal:
+
+| Situation on arrival at `/game/[roomCode]` | Action |
+|---|---|
+| Live bound session for this room (e.g. `room.create`/`room.join` just resolved and F1 navigated here) | **No-op.** Never send a second `session.resume` on a bound connection (§8) |
+| No bound session, token for this room in storage | connect + `session.resume` → `session.ready` |
+| No token for this room | nothing to resume — F4 renders its "not in this room" state; no error |
+
+Bootstrap points where the service re-checks this decision: its first
+evaluation in the browser (fresh load, reload, deep link), `popstate`
+(back/forward), the `pageshow` bfcache restore, and the §6 browser
+events. Screens never trigger resume — they render the state it
+produces (doc 03 §5). Deleting the token on leave/expiry is doc 04 §5.
+A stored token for a *different* room is never resumed — only the room
+in the URL counts.
+
 ## 8. Server behavior your client must match (from B3's docs)
 
 | Server behavior | Your client's obligation |
 |---|---|
-| Heartbeat: protocol-level Ping every 30 s; closes after 2 unanswered (≈60–90 s) | RN WebSocket is expected to auto-pong protocol pings — **verify on a real device** (§9). No app-level ping/pong exists in v1; never poll. |
+| Heartbeat: protocol-level Ping every 30 s; closes after 2 unanswered (≈60–90 s) | Browsers answer protocol-level Pings with Pong automatically (RFC 6455); the JS API does not even surface them. Verify once end-to-end (doc 05 §3, S4). No app-level ping/pong exists in v1; never poll. |
 | Malformed/binary frame → `server.error INVALID_PAYLOAD`, budget 3, then Close(1008) | Treat `INVALID_PAYLOAD` as a client bug — log it loudly in dev; the close after 3 is expected. |
 | `v ≠ 1` → `UNSUPPORTED_VERSION` + close | Should never happen (you always send `PROTOCOL_VERSION`); if it arrives, surface "please update". |
 | Auth state machine: a connection binds ONCE (`room.create`/`room.join`/`session.resume`) and in-room commands only work when bound | After `room.leave`, do NOT reuse the socket for a new room — tear down and open a fresh connection (B3 doc 02 §5.1/D3). |
@@ -237,19 +328,17 @@ was in a room:
 | Non-move rejections (`offer_draw`…) arrive as `server.error`; only failed `game.move` gets `game.move_rejected` (to the mover only) | Clear pending for both channels; map both to UI messages. |
 | Rate limits: 10 cmds/s burst 20; create/join/resume 1 per 10 s per connection; violations → `server.error RATE_LIMITED` | Never auto-retry in a tight loop; gate buttons on pending state. A backoff retry hitting create/join throttling must not machine-gun. |
 | 64 KiB max message/frame; text frames only | Your biggest message is tiny; just never build binary frames. |
-| Server-initiated close after `game.finished` retention ends | Expected close → do not reconnect if the room is finished and the user hasn't asked for a rematch.
+| Server-initiated close after `game.finished` retention ends | Expected close → do not reconnect if the room is finished and the user hasn't asked for a rematch. |
 
 ## 9. Heartbeat from the client side
 
 - v1 has **no app-level heartbeat messages** — do not invent
   `ping`/`keepalive` command types (that would be a protocol change, doc 01).
-- The server sends WebSocket protocol-level Ping frames; the native
-  WebSocket layer is generally expected to answer with Pong
-  automatically. **Do not assume — verify on a real device** (the
-  manual checklist in doc 05 §3, scenario 4): connect, keep the app idle
-  > 90 s, confirm the server does NOT drop you (i.e., pongs flow without
-  your code doing anything). If a platform ever fails to auto-pong,
-  surface it to the team; only a server-side policy change fixes it.
+- The server sends WebSocket protocol-level Ping frames; the browser
+  answers them with Pong automatically (RFC 6455 mandates it, and the
+  JS API gives you no way to interfere). Verify once end-to-end in the
+  manual checklist (doc 05 §3, S4): keep a tab idle > 90 s and confirm
+  the server does NOT drop you.
 - Your only client-side heartbeat work is the §6 watchdog (detecting a
   dead socket the OS hasn't noticed) and NOT spamming the server.
 
@@ -259,32 +348,36 @@ Shape only — the real event routing, backoff, and resume logic is yours.
 Keep the responsibilities, design the details as you see fit.
 
 ```ts
-// src/services/websocket.ts — SKELETON
-import * as Crypto from "expo-crypto";
+// src/services/websocket.ts — SKELETON (client-side module, doc 02 §1)
 import {
   ClientCommand,
   ClientEnvelope,
   PROTOCOL_VERSION,
   ServerEnvelope,
-  ServerEvent,
 } from "@/types/protocol";
+import { resolveWsUrl } from "@/services/config";
 
 type EventHandler = (envelope: ServerEnvelope) => void;
-type ConnectionStatus = "idle" | "connecting" | "connected" | "reconnecting" | "disconnected";
+type ConnectionStatus =
+  | "idle" | "connecting" | "connected" | "reconnecting" | "disconnected";
 
 // TODO(F3): generation counter, backoff timer, watchdog, socket ref.
 // TODO(F3): route inbound events to stores (doc 03) — or keep stores
 //           subscribed via onEvent; pick ONE routing direction and
 //           document it.
+// TODO(F3): browser triggers — online/offline/visibilitychange/pageshow
+//           (§6) and the resume-on-navigation decision (§7); all
+//           registered browser-only, removed on teardown.
 
 export const websocketService = {
-  connect(url: string): void {
-    // TODO: open socket, wire guarded callbacks (§5), transition to
-    //       "connecting" -> "connected" on open.
+  connect(url: string = resolveWsUrl()): void {
+    // TODO: new WebSocket(url), wire generation-guarded callbacks (§5),
+    //       transition "connecting" -> "connected" on open. Never call
+    //       during SSR/render (§1).
   },
   send(command: ClientCommand): void {
     // TODO: wrap in ClientEnvelope { v: PROTOCOL_VERSION,
-    //       id: Crypto.randomUUID(), ...command }, JSON.stringify, send.
+    //       id: crypto.randomUUID(), ...command }, JSON.stringify, send.
     //       Reject/queue while not "connected" (§3).
   },
   onEvent(handler: EventHandler): () => void {
@@ -293,9 +386,10 @@ export const websocketService = {
   },
   disconnect(): void {
     // TODO: user-initiated — no reconnect; generation++ so stale
-    //       callbacks die; stop timers.
+    //       callbacks die; stop timers, remove browser listeners.
   },
-  // TODO: resume flow (§7), backoff scheduler (§6), watchdog (§6),
+  // TODO: resume decision incl. resume-on-navigation (§7),
+  //       backoff scheduler with full jitter (§6), watchdog (§6),
   //       parseServerEnvelope(raw): ServerEnvelope | null (§4).
 };
 ```

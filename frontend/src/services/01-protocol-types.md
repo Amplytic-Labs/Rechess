@@ -1,8 +1,11 @@
 # 01 — Owning `src/types/protocol.ts`
 
-> The types are **already written and complete**. This doc tells you what
-> exists, the rule you are bound by when touching it, and the verification
-> habit that keeps the frontend and backend from drifting apart.
+> The types are **already written and complete**, and the wire protocol
+> is **unchanged by the web migration**: the three-way match (Rust ↔
+> TypeScript ↔ `docs/protocol-v1.md`) was verified clean and stays
+> described as-is. This doc tells you what exists, the rule you are bound
+> by when touching it, and the verification habit that keeps the frontend
+> and backend from drifting apart.
 
 ## 1. What already exists — do not rewrite it
 
@@ -25,7 +28,7 @@
 | `GameResult` | interface | `{ winner: PlayerColor \| null, reason }` |
 | `GameSnapshot` | interface | `{ room_code, status, game_status, result, fen, turn, last_move, move_history, legal_moves, players, draw_offer }` — the authoritative state |
 | `EmptyPayload` | type | `Record<string, never>` (payload of `room.leave`) |
-| `ClientCommand` | union | 9 variants — see doc 03 §5 |
+| `ClientCommand` | union | 9 variants — see doc 03 §6 |
 | `ClientEnvelope` | type | `{ v: number; id: string } & ClientCommand` |
 | `RoomCreatedPayload` | interface | the ONLY payload with `player_token` |
 | `RoomJoinedPayload` | interface | also carries `player_token` |
@@ -98,7 +101,7 @@ Prefer this order, each step a joint PR with B3:
 5. Bump nothing silently: v1 has one `PROTOCOL_VERSION`; a v2 is a team
    decision, not a side effect.
 
-## 5. `protocol.fixtures.ts` — how the rest of the team uses it
+## 5. `protocol.fixtures.ts` + `protocol.test.ts` — how the team uses them
 
 `src/types/protocol.fixtures.ts` contains typed, realistic wire data
 (mirroring the backend fixtures in `backend/src/protocol/mod.rs` and
@@ -116,7 +119,7 @@ Prefer this order, each step a joint PR with B3:
 these fixtures** (e.g. F1's waiting room renders `sampleRoom`, F4's
 screen renders `sampleSnapshot`, the board adapter eats
 `sampleSnapshot.fen`). That is the whole point: UI work does not block on
-your socket. Two consequences for you:
+your socket. Three consequences for you:
 
 1. **Do not change fixture shapes casually** — screens depend on them.
    If a fixture must change (because the protocol changed), announce it
@@ -124,6 +127,9 @@ your socket. Two consequences for you:
 2. When your real service lands, the fixtures stay: they are the mock
    data for the dev-only mock strategy (doc 05 §4) and the typecheck
    proof of the contract (below).
+3. `src/types/protocol.test.ts` pins the envelope shapes against these
+   fixtures with **vitest** — it is also **the pattern for your own unit
+   suite** (doc 05 §1): pure logic, node environment, no DOM, no sockets.
 
 ## 6. The verification habit — after ANY edit to `protocol.ts`
 
@@ -133,6 +139,7 @@ No exceptions, every time:
 cd frontend
 npm run typecheck   # proves the fixtures still satisfy the types
 npm run lint
+npm run test        # vitest — the wire-contract suite stays green
 ```
 
 and in the same PR:
@@ -142,18 +149,15 @@ and in the same PR:
 - cross-check `backend/src/protocol/` — every Rust field name and serde
   rename must agree (B3 reviews, but you diff it yourself first);
 - if you added/changed a fixture, re-read it against the new types (that
-  is what makes `npm run typecheck` meaningful as a contract check).
+  is what makes `npm run typecheck` meaningful as a contract check), and
+  extend `protocol.test.ts` if you added a wire shape worth pinning.
 
-Why typecheck is the logic gate: `protocol.fixtures.ts` imports the types
-and constructs full realistic messages. If your edit breaks the contract,
-`tsc --noEmit` fails on the fixtures. The backend half of the same proof
-is `cargo test` (`backend/tests/protocol_contract.rs` round-trips the
-identical JSON through the Rust wire types). One wire, two compilers.
-
-## 7. Known nit to fix when you touch the file
-
-The header comment in `protocol.ts` says the fixtures live in
-`protocol.test.ts` — that file was renamed to `protocol.fixtures.ts` when
-jest was dropped (RULES.md §5: no frontend test runner by design). Fix
-the comment in your next PR touching the file so nobody goes hunting for
-a test file that does not exist.
+Why typecheck plus vitest are the logic gates: `protocol.fixtures.ts`
+imports the types and constructs full realistic messages — if your edit
+breaks the contract, `tsc --noEmit` fails on the fixtures, and
+`protocol.test.ts` pins the envelope shapes (flattening, the
+always-present `promotion: null`, revision placement) against them. The
+backend half of the same proof is `cargo test`
+(`backend/tests/protocol_contract.rs` round-trips the identical JSON
+through the Rust wire types). One wire, two compilers, one test suite
+per side.

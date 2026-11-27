@@ -1,96 +1,196 @@
-# 01 — Screens guide (HOW to build each lobby screen)
+# 01 — Screens guide (HOW to build the lobby UI and the shared primitives)
 
-Conventions for all four screens in `src/screens/lobby/`:
+Conventions for every component you build in `src/screens/lobby/` and
+`src/components/common/`:
 
-- **Screen components** live here (`home-screen.tsx`, `create-room-screen.tsx`,
-  `join-room-screen.tsx`, `waiting-room-screen.tsx`); the route files in
-  `src/app/` just render them (see `02-routes-and-navigation.md`).
-- **Styling**: uniwind `className` ONLY — no `StyleSheet`, no inline styles,
-  no hardcoded colors (`bg-[#…]` is banned). Colors come from the semantic
-  tokens in `frontend/global.css`:
+- **Client components**: every file that uses hooks, state or event handlers
+  starts with `"use client";` — the app is a real-time WebSocket client
+  (RULES.md §2). The route files in `src/app/` stay plain thin wrappers
+  (`02-routes-and-navigation.md`); the screens carry the interactivity.
+- **Styling**: Tailwind `className` ONLY — no static `style={{…}}` objects, no
+  CSS files of your own, no hardcoded colors (`bg-[#…]` is banned by ESLint).
+  Colors come from the semantic tokens in `frontend/global.css`:
 
-  | Token (utility) | Use on a lobby screen |
+  | Token (utility) | Use in the lobby |
   |---|---|
   | `bg-background` | screen background |
   | `bg-surface` / `bg-surface-muted` | cards, inset panels, the room-code plate |
   | `text-foreground` / `text-muted-foreground` | primary / secondary text |
   | `bg-primary` + `text-primary-foreground` | primary action (Create / Join button) |
   | `border-border` | dividers, outlines |
-  | `text-destructive` / `bg-destructive` | validation + server error messages |
-  | `text-success` | connected / ready state |
+  | `text-destructive` / `bg-destructive` | validation + server error messages, the danger variant |
+  | `text-success` | connected / ready / copied feedback |
 
-  Dark mode is automatic (system theme) — never write `dark:` overrides for
-  these, the token values switch themselves.
-- **Safe areas**: wrap every screen in `StyledSafeAreaView` from
-  `@/components/common/styled` (never import `SafeAreaView` directly).
-- **HeroUI Native 1.1**, granular imports only — `import { Button } from "heroui-native/button"`; the root `heroui-native` import is banned by
-  ESLint. Verified props in the installed package
-  (`node_modules/heroui-native/src/components/*/​*.types.ts`):
-  - `Button`: `variant?: "primary" | "secondary" | "tertiary" | "outline" | "ghost" | "danger" | "danger-soft"`, `size?: ButtonSize`, `isDisabled?: boolean`, `isIconOnly?: boolean`, `children`.
-  - `Input`: `variant?: "primary" | "secondary"`, `isInvalid?: boolean`, `isDisabled?: boolean`, plus the usual `TextInput` props (`value`, `onChangeText`, `placeholder`, … — confirm against `input.types.ts`).
-  - Also available granularly: `heroui-native/card`, `heroui-native/spinner`, `heroui-native/toast`, `heroui-native/dialog`, `heroui-native/label`, `heroui-native/separator`, …
+  Dark mode is automatic (system theme, `prefers-color-scheme`) — never write
+  `dark:` overrides for these, the token values switch themselves.
+- **No component library**: buttons, inputs, cards, dialogs and toasts come
+  from `@/components/common/…` — the primitives YOU build (§1 below). Never
+  hand-roll per-screen copies, never install a UI kit (new dependency = team
+  PR).
+- **Responsive by default**: mobile portrait first, then tablet/desktop. No
+  fixed page widths; columns and rows collapse to one column on narrow
+  screens; every input/button keeps a comfortable size (`min-h-11` ≈ 44px
+  touch target).
+- **Accessibility is not optional**: real `<button>`/`<input>` elements,
+  `htmlFor`-linked labels, `aria-invalid` + `aria-describedby` on errored
+  inputs, and a **visible focus state on every control** (e.g.
+  `focus-visible:outline-2 focus-visible:outline-offset-2
+  focus-visible:outline-primary`). Keyboard operation is part of the manual
+  checklist (`03-manual-testing.md`).
 - **Fixtures**: while F3/backend are landing, import from
   `@/types/protocol.fixtures` (`sampleRoom`, `sampleRoomCreatedEvent`, …) to
-  render screens with realistic data; swap for F3's hooks when they exist.
-- Accessibility: labels on inputs, ≥ 44pt touch targets, token contrast.
+  render screens with realistic data; swap for F3's hooks when they exist (§5).
 
 ---
 
-## 1. Home screen — `src/screens/lobby/home-screen.tsx`
+## 1. Shared UI primitives — `src/components/common/` (yours)
 
-The app's entry point. Requirements: clear branding ("Rechess"), exactly two
-actions — **Create room** (primary) and **Join room** — and **no** sign-up or
-login entry anywhere (brief §6).
+There is no component library in the stack: F1 builds the shared primitives
+once, and every module imports them (RULES.md §1.3). The initial set:
+
+| Primitive | File | Responsibility |
+|---|---|---|
+| `Button` | `src/components/common/button.tsx` | all actions — variants `primary` / `secondary` / `danger`; `loading` + `disabled` states (spinner + `aria-busy`); renders a native `<button>` |
+| `Input` | `src/components/common/input.tsx` | labeled text field — `label`, `hint`, `error` (wired to `aria-invalid`/`aria-describedby`), `maxLength`, `value`/`onChange` |
+| `Card` | `src/components/common/card.tsx` | surface panel — `bg-surface`, `border-border`, rounded; layout via `className`/children, not a rigid slot system |
+| `Dialog` | `src/components/common/dialog.tsx` | modal confirmations (e.g. "Leave the room?") — `role="dialog"`, `aria-modal`, focus trap, `Escape` closes, focus returns to the trigger |
+| `Toast` | `src/components/common/toast.tsx` | transient non-blocking messages ("Copied!", recoverable errors) — `role="status"`/`aria-live="polite"`, auto-dismiss |
+
+Loading and error presentation live inside the primitives (`Button` loading,
+`Input` error) — do not build separate loading/error components in the MVP.
+Import them granularly (`import { Button } from "@/components/common/button";`)
+— no barrel file needed.
+
+Rules (binding for every primitive):
+
+- **Token-themed**: colors only via the token utilities in the table above;
+  dark mode must work with zero per-component work. No hardcoded colors, no
+  `bg-[#…]`.
+- **Keyboard accessible**: native elements, operable with Tab / Enter /
+  Escape alone; the `Dialog` traps focus and restores it on close.
+- **Focus-visible**: every interactive element shows a clear focus state via
+  `focus-visible:` utilities — never `outline-none` without a replacement.
+- **Client components**: files that hold state/effects start with
+  `"use client";`. A primitive with zero interactivity (`Card`) can stay a
+  plain component — don't sprinkle the directive where it isn't needed.
+- **No chess-specific UI** — that is F2's (`src/components/chess/`), never
+  here. No lobby-specific copy either: primitives are generic.
+- **Additions go through a short PR** (RULES.md §1.3): a new primitive or a
+  new variant is a team-visible change to shared surface.
+
+`Button` skeleton (the pattern for the rest — the real surface is yours):
+
+```tsx
+// src/components/common/button.tsx
+"use client";
+
+import type { PropsWithChildren } from "react";
+
+type ButtonVariant = "primary" | "secondary" | "danger";
+
+interface ButtonProps extends PropsWithChildren {
+  variant?: ButtonVariant;
+  loading?: boolean; // spinner + aria-busy; blocks further presses
+  disabled?: boolean;
+  type?: "button" | "submit";
+  onClick?: () => void;
+}
+
+export function Button({
+  variant = "primary",
+  loading = false,
+  disabled,
+  type = "button",
+  onClick,
+  children,
+}: ButtonProps) {
+  // TODO(F1): variant → token classes (primary: bg-primary text-primary-foreground;
+  //           secondary: border-border bg-surface text-foreground;
+  //           danger: bg-destructive text-background);
+  //           min-h-11 touch target; focus-visible outline; loading/disabled states
+  return (
+    <button
+      type={type}
+      disabled={disabled || loading}
+      aria-busy={loading}
+      onClick={onClick}
+      className="…" // TODO(F1): token classes — see the rules above
+    >
+      {children}
+    </button>
+  );
+}
+```
+
+## 2. Home screen — `src/screens/lobby/home-screen.tsx`
+
+The app's entry point, served at `/` (`src/app/page.tsx` renders it — see
+`02-routes-and-navigation.md`). It carries the whole pre-game flow in one
+screen — there is no separate create/join route:
+
+- clear branding ("Rechess"), **no** sign-up or login entry anywhere
+  (brief §6);
+- one **nickname** input shared by both actions;
+- the primary action **Create room**;
+- the join section: a **room code** input + **Join room**.
 
 Skeleton (partial — the real work is yours):
 
 ```tsx
 // src/screens/lobby/home-screen.tsx
-import { Text, View } from "react-native";
+"use client";
 
-import { Button } from "heroui-native/button";
+import { useState } from "react";
 
-import { router } from "expo-router";
+import { useRouter } from "next/navigation";
 
-import { StyledSafeAreaView } from "@/components/common/styled";
+import { Button } from "@/components/common/button";
+import { Input } from "@/components/common/input";
+
+// TODO(F1): when F3 publishes hooks — import { useRoomActions } from "@/hooks/<F3's module>";
+// TODO(F1): mock phase — drive the UI with sampleRoomCreatedEvent from "@/types/protocol.fixtures"
 
 export function HomeScreen() {
+  const router = useRouter();
+  const [nickname, setNickname] = useState("");
+  const [roomCode, setRoomCode] = useState("");
+  // TODO(F1): trim + validate the nickname (1–20 chars, no control chars)
+  // TODO(F1): createRoom(nickname) — loading/disabled, no double submits
+  // TODO(F1): joinRoom(normalize(roomCode), nickname) — same
+  // TODO(F1): on success → router.push(`/game/${roomCode}`)
   return (
-    <StyledSafeAreaView className="flex-1">
-      <View className="flex-1 items-center justify-center gap-4 px-6">
-        <Text className="text-4xl font-bold text-foreground">Rechess</Text>
-        <Text className="text-center text-base text-muted-foreground">
-          Play chess with a friend — no account needed.
-        </Text>
-        {/* TODO(F1): primary action — Create room */}
-        <Button variant="primary" className="min-w-[220px]" onPress={() => router.push("/create-room")}>
-          Create room
-        </Button>
-        {/* TODO(F1): secondary action — Join room */}
-        <Button variant="secondary" className="min-w-[220px]" onPress={() => router.push("/join-room")}>
-          Join room
-        </Button>
-      </View>
-    </StyledSafeAreaView>
+    <main className="flex flex-1 flex-col items-center justify-center gap-6 px-6">
+      <h1 className="text-4xl font-bold text-foreground">Rechess</h1>
+      <p className="text-center text-base text-muted-foreground">
+        Play chess with a friend — no account needed.
+      </p>
+      {/* TODO(F1): <Input label="Nickname" value={nickname} onChange={…} /> */}
+      {/* TODO(F1): <Button variant="primary" className="min-w-[220px]">Create room</Button> */}
+      {/* TODO(F1): <Input label="Room code" value={roomCode} onChange={…} /> */}
+      {/* TODO(F1): <Button variant="secondary" className="min-w-[220px]">Join room</Button> */}
+    </main>
   );
 }
 ```
 
-Layout notes: center the block vertically, `px-6` gutters, `gap-4` rhythm;
-nothing else on this screen. Keep it this small.
+Layout notes: center the block vertically, `px-6` gutters, `gap-6` rhythm; on
+narrow screens everything stacks in one column. Keep the screen this small —
+the placeholder in `src/app/page.tsx` is the size reference. If the file
+grows, split the two actions into local `create-room-form.tsx` /
+`join-room-form.tsx` components in this folder; do not add routes for them.
 
-## 2. Create room — `src/screens/lobby/create-room-screen.tsx`
-
-Form: one nickname input → submit → waiting room.
+### 2.1 Nickname validation
 
 **Validation (mirror `docs/protocol-v1.md` §3 so the server never has to
 reject it):** nickname required, **1–20 characters**, **no control
-characters** (`/[\u0000-\u001F\u007F]/`). Disable Submit while invalid or
-while the request is in flight (loading state) — no double submits.
+characters** (`/[\u0000-\u001F\u007F]/`), trimmed before send. Disable the
+submitting button while the input is invalid or while the request is in
+flight (loading state) — no double submits.
 
-**What happens on submit:** your screen calls F3's action — you never build
-an envelope or open a socket. The exact wire command F3 sends for you is
-(from `src/types/protocol.ts`):
+### 2.2 What happens on submit — create
+
+Your screen calls F3's action — you never build an envelope or open a socket.
+The exact wire command F3 sends for you is (from `src/types/protocol.ts`):
 
 ```ts
 | { type: "room.create"; payload: { nickname: string } }
@@ -104,7 +204,7 @@ The private reply (`RoomCreatedPayload` — the ONLY wire event carrying
 export interface RoomCreatedPayload {
   room_code: string;
   player_id: string;
-  player_token: string; // F3 stores this securely — your screen NEVER sees/stores/logs it
+  player_token: string; // F3 stores this in its storage module — your screen NEVER sees/stores/logs it
   color: PlayerColor;   // "white" for the host
   room: RoomPublicState;
 }
@@ -112,43 +212,10 @@ export interface RoomCreatedPayload {
 
 Your screen only consumes the **non-secret** result — room code + your color —
 as returned by F3's `createRoom` action / `useRoomState()`. On success:
-`router.push` to the waiting room (room code may travel as a route param;
-`player_token` NEVER).
+navigate to the waiting room, which lives at `/game/[roomCode]` (the room code
+goes in the URL path, uppercase; `player_token` NEVER — RULES.md §3).
 
-Skeleton:
-
-```tsx
-// src/screens/lobby/create-room-screen.tsx
-import { useState } from "react";
-import { Text, View } from "react-native";
-
-import { Button } from "heroui-native/button";
-import { Input } from "heroui-native/input";
-
-import { StyledSafeAreaView } from "@/components/common/styled";
-
-// TODO(F1): when F3 publishes hooks — e.g. import { useRoomActions } from "@/hooks/<F3's module>";
-// TODO(F1): mock phase — drive the UI with sampleRoomCreatedEvent from "@/types/protocol.fixtures"
-
-export function CreateRoomScreen() {
-  const [nickname, setNickname] = useState("");
-  // TODO(F1): trim + validate (1–20 chars, no control chars)
-  // TODO(F1): submitting/loading state; call F3's createRoom(nickname)
-  // TODO(F1): on success → router.push({ pathname: "/waiting-room", params: { roomCode } })
-  // TODO(F1): on failure → friendly themed error (see the error table in §3 below)
-  return (
-    <StyledSafeAreaView className="flex-1">
-      <View className="flex-1 justify-center gap-4 px-6">
-        <Text className="text-2xl font-bold text-foreground">Create room</Text>
-        {/* TODO(F1): <Input value={nickname} onChangeText={setNickname} ... /> + hint text */}
-        {/* TODO(F1): <Button isDisabled={…}>Create</Button> with loading state */}
-      </View>
-    </StyledSafeAreaView>
-  );
-}
-```
-
-## 3. Join room — `src/screens/lobby/join-room-screen.tsx`
+## 3. Join flow (on the home screen)
 
 Form: room code + nickname → submit → waiting room.
 
@@ -156,9 +223,9 @@ Form: room code + nickname → submit → waiting room.
 whitespace, uppercase, and reject anything that isn't exactly **8 characters
 from the unambiguous alphabet `ABCDEFGHJKMNPQRSTUVWXYZ23456789`** after
 normalization (no `I`, `L`, `O`, `0`, `1`). Per `docs/protocol-v1.md` §3 the
-server uppercases case-insensitive input too, but a clean client normalization
-(`code.trim().toUpperCase()`) gives instant feedback and avoids a round trip.
-Wire command F3 sends for you:
+server normalizes case-insensitive input too, but a clean client
+normalization (`code.trim().toUpperCase()`) gives instant feedback and avoids
+a round trip. Wire command F3 sends for you:
 
 ```ts
 | { type: "room.join"; payload: { room_code: string; nickname: string } }
@@ -185,35 +252,46 @@ a switch over the error) inside `src/screens/lobby/`:
 (`INVALID_TOKEN`, `NOT_YOUR_TURN`, `ILLEGAL_MOVE`, `STALE_REVISION`,
 `GAME_FINISHED` belong to F3/F4 flows, not your forms.)
 
-Skeleton: same shape as create-room — two `Input`s (code first with
-`autoCapitalize="characters"` + `maxLength={8}`, then nickname) + Submit
-button with disabled/loading states, then the error row rendered with
-`text-destructive`. Reuse the nickname validation from §2.
+The room-code `Input` gets `maxLength={8}`; normalization handles case and
+whitespace before send. Reuse the nickname validation from §2.1 for the join
+submit.
 
-## 4. Waiting room — `src/screens/lobby/waiting-room-screen.tsx`
+## 4. Waiting room — `src/screens/lobby/waiting-room.tsx`
 
-Shown to host and guest after create/join succeeds.
+Not a route — it is the panel rendered at `/game/[roomCode]` while the room
+status is `"waiting"` (F4's game composition mounts it; the contract is
+`04-acceptance.md` §3). Shown to host and guest after create/join succeeds.
 
-Must show: the **room code prominently** (big `text-3xl font-bold`-ish plate
-on `bg-surface-muted` with `border-border`), a **copy button** using
-`expo-clipboard` (confirmed in `package.json`: `expo-clipboard ~58.0.4`):
+Must show:
+
+- the **room code prominently** — big plate (`text-3xl font-bold
+  tracking-widest` on `bg-surface-muted` with `border-border`, optionally
+  inside a `Card`);
+- a **copy button** using the browser clipboard API:
 
 ```tsx
-import * as Clipboard from "expo-clipboard";
-// on press:
-await Clipboard.setStringAsync(roomCode);
-// then a small "Copied" confirmation (text-success or a toast from heroui-native/toast)
+// on click (guard for contexts where the API is unavailable)
+if (navigator.clipboard) {
+  await navigator.clipboard.writeText(roomCode);
+  // then a small "Copied" confirmation (text-success or a Toast)
+}
 ```
 
-(An optional share affordance can use React Native's built-in
-`Share.share({ message: roomCode })`.)
+  `navigator.clipboard` requires a secure context — `http://localhost:3001`
+  qualifies; keep a graceful fallback (the code renders as selectable text
+  for manual copy) for older browsers.
+- your nickname + assigned color (White for the host, Black for the guest);
+- the opponent's seat as a placeholder ("Waiting for opponent…") until they
+  join;
+- a connection state indicator driven by F3's `useConnection()` (never a
+  local timer);
+- a **Leave** action: confirm inside a `Dialog` ("Leave the room? The other
+  player will be notified.") → on confirm call F3's `leaveRoom()` →
+  `router.push("/")`.
 
-Plus: your nickname + assigned color (White for the host, Black for the
-guest), the opponent's seat as a placeholder ("Waiting for opponent…")
-until they join, and a connection state indicator driven by F3's
-`useConnection()` (never a local timer). Read the room code from route
-params (`useLocalSearchParams`) and the live room state from F3's
-`useRoomState()` — fixture `sampleRoom` shows the one-player shape:
+Read the room code from the URL (`useParams` — the URL is the address) and
+the live room state from F3's `useRoomState()` (players/status are
+server-authoritative — fixture `sampleRoom` shows the one-player shape):
 
 ```ts
 export const sampleRoom: RoomPublicState = {
@@ -223,48 +301,48 @@ export const sampleRoom: RoomPublicState = {
 };
 ```
 
-**Transition to the game:** when both seats are filled — i.e. room `status`
-flips from `"waiting"` to `"active"` via F3's store — navigate to F4's game
-route with the room code (`router.replace` — see
-`02-routes-and-navigation.md`). Never navigate on a timer or on local
-optimism; the server is authoritative.
+### 4.1 Transition to the game — no navigation
+
+When both seats are filled — i.e. room `status` flips from `"waiting"` to
+`"active"` via F3's store — the waiting room simply unmounts and F4's game UI
+takes over **on the same URL**. Never navigate on a timer or on local
+optimism; the server is authoritative (RULES.md §4). This is also why the URL
+is shareable: reloading `/game/TESTCODE1`, or opening it directly, resumes
+the session via F3's service (token from F3's storage — never the URL).
 
 Skeleton:
 
 ```tsx
-// src/screens/lobby/waiting-room-screen.tsx
+// src/screens/lobby/waiting-room.tsx
+"use client";
+
 import { useState } from "react";
-import { Text, View } from "react-native";
 
-import { Button } from "heroui-native/button";
+import { useParams, useRouter } from "next/navigation";
 
-import { useLocalSearchParams } from "expo-router";
-
-import { StyledSafeAreaView } from "@/components/common/styled";
 // TODO(F1): F3's useRoomState()/useConnection(); mock with sampleRoom / sampleRoomCreatedEvent first
 
-export function WaitingRoomScreen() {
-  const { roomCode } = useLocalSearchParams<{ roomCode: string }>();
+export function WaitingRoom() {
+  const { roomCode } = useParams<{ roomCode: string }>();
+  const router = useRouter();
   const [copied, setCopied] = useState(false);
-  // TODO(F1): copy via Clipboard.setStringAsync(roomCode)
+  // TODO(F1): copy via navigator.clipboard.writeText(roomCode) + "Copied" feedback
   // TODO(F1): render players[0]/players[1] seats + "Waiting for opponent…" placeholder
   // TODO(F1): connection indicator from useConnection()
-  // TODO(F1): when status === "active" → router.replace({ pathname: "/game", params: { roomCode } }) (confirm route with F4)
+  // TODO(F1): Leave → Dialog confirm → leaveRoom() → router.push("/")
   return (
-    <StyledSafeAreaView className="flex-1">
-      <View className="flex-1 items-center gap-6 px-6">
-        {/* TODO(F1): room code plate */}
-        <Text className="text-3xl font-bold tracking-widest text-foreground">{roomCode}</Text>
-        {/* TODO(F1): copy button + copied feedback */}
-      </View>
-    </StyledSafeAreaView>
+    <section className="flex flex-1 flex-col items-center justify-center gap-6 px-6">
+      {/* TODO(F1): room code plate */}
+      <p className="text-3xl font-bold tracking-widest text-foreground">{roomCode}</p>
+      {/* TODO(F1): copy button + copied feedback; seats; connection indicator; leave */}
+    </section>
   );
 }
 ```
 
 ## 5. Building before F3 exists (fixture/mock mode)
 
-Until F3's hooks land (Day 3–4), render each screen against the fixtures in
+Until F3's hooks land, render each screen against the fixtures in
 `src/types/protocol.fixtures.ts`: drive the waiting room with `sampleRoom`
 (1 player) and a hand-written two-player `RoomPublicState`, and simulate
 `room.created` with `sampleRoomCreatedEvent` (its `room` field is the same

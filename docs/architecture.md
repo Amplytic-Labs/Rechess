@@ -4,8 +4,8 @@
 
 ```
 ┌──────────────────────┐         WSS (protocol v1)         ┌──────────────────────┐
-│  Expo mobile client  │ ◀───────────────────────────────▶ │   Rust backend        │
-│  (SDK 58, RN 0.88)   │                                  │   axum 0.8 · tokio     │
+│  Next.js web client  │ ◀───────────────────────────────▶ │   Rust backend        │
+│  (browser, React 19) │                                  │   axum 0.8 · tokio     │
 │                      │                                  │   single process       │
 │  F1 lobby screens    │                                  │  ┌──────────────────┐  │
 │  F2 chessboard       │                                  │  │ B3 network       │  │

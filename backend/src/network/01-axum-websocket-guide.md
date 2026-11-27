@@ -327,8 +327,8 @@ them into the deployment docs.
 
 - **Server-initiated Ping every 30 s** (`HEARTBEAT_INTERVAL`), using real
   WebSocket protocol Ping frames (`Message::Ping`), **not** an application
-  event — the v1 protocol has no app-level heartbeat message, and browser /
-  Expo WebSocket stacks answer protocol Pings automatically.
+  event — the v1 protocol has no app-level heartbeat message, and browser
+  WebSocket stacks answer protocol-level Pings automatically.
 - **Drop after 2 missed Pongs** (`MAX_MISSED_PONGS = 2`): every inbound
   frame (text, pong — anything) resets `missed_pongs`; the tick arm closes
   when the counter has hit 2 with nothing in between. Arithmetic: ping at

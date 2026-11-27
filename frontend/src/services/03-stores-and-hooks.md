@@ -4,6 +4,15 @@
 > subscribe with **narrow selectors** (`useRoomStore((s) => s.status)`),
 > never whole-store reads. State is server-authoritative — your stores
 > are a typed cache of what the server said, plus pending/error flags.
+>
+> These are **plain client-side modules**: creating a zustand store at
+> module top level is fine (store creation touches no browser API), and
+> they are consumed from client components (`"use client"`). Two
+> consequences: nothing in a store may read `window` or storage at module
+> scope — the server pre-render evaluates this code in Node (doc 02 §1) —
+> and do **not** add zustand `persist` middleware: it touches storage at
+> import time and bypasses the security wrapper. Storage access goes
+> through `src/security/` only (doc 04).
 
 ## 1. The three stores
 
@@ -17,8 +26,8 @@
 > `session-store.ts` (`yourColor`, `playerId`). This doc folds those into
 > `roomStore` ("my credentials wrapper") — one fewer store, same data.
 > If you prefer four stores, update this doc in the same PR; do not ship
-> both. The `player_token` is **not** in any store — SecureStore only
-> (doc 04).
+> both. The `player_token` is **not** in any store — it lives in F3's
+> storage module only (doc 04).
 
 Rules:
 
@@ -26,6 +35,10 @@ Rules:
   finished (master plan §8). A finished game can be viewed offline.
 - Action state (loading/error) lives with the action, not in a global
   toast queue — screens bind it to the button that caused it.
+- No store touches the browser API directly: sockets are the service's
+  (doc 02), storage is the security module's (doc 04). Stores are pure
+  typed state + reducers — which is exactly what makes them unit-testable
+  (doc 05 §1).
 
 ## 2. The snapshot you store — `GameSnapshot` (from `protocol.ts`)
 
@@ -100,14 +113,19 @@ they are frozen, not a proposal.** F4's
 `src/screens/game/01-screen-composition.md` §6 wires exactly these hooks
 (`useGameState()`, `useRoomState()`, `useRoomActions()`, `useConnection()`).
 F1's `src/screens/lobby/04-acceptance.md` §2 pins the same names
-(`useRoomActions`, `useRoomState`).
+(`useRoomActions`, `useRoomState`, `yourColor`).
 
 | Frozen hook | Returns | Consumed by |
 |---|---|---|
 | `useConnection()` | `connectionStore` slice: `status`, `attempts`, `lastError` — for banners/disabled states | F1 (waiting room), F4 (connection banner) |
-| `useRoomState()` | `{ roomCode, players, status, yourColor, connection }` (F1's `04-acceptance.md` §2 pins `roomCode, players, status, connection`; camelCase display names mapping `room_code` etc.) | F1 (waiting room), F4 (panels) |
-| `useGameState()` | `{ snapshot, pending }` — the whole `GameSnapshot` (+ `revision` if F4 needs it) | F4 (board/turn/history/result) |
+| `useRoomState()` | `{ roomCode, players, status, yourColor, connection }` — camelCase display names mapping `room_code` etc.; `connection` mirrors the transport status (the same string `useConnection().status` reveals), so one hook can drive a whole panel | F1 (waiting room), F4 (panels) |
+| `useGameState()` | `{ snapshot, pending }` — the whole `GameSnapshot`; draw offers are read from `snapshot.draw_offer` (there is no separate draw-offer state — it IS a snapshot field) | F4 (board/turn/history/result/draw banner) |
 | `useRoomActions()` | `createRoom, joinRoom, submitMove, offerDraw, acceptDraw, resign, rematch, leaveRoom` — each sets loading/error and returns a promise where a reply is expected | F1 (create/join), F4 (controls), F2 via F4 |
+
+**Resume is not an action** — `session.resume` is service-internal
+(doc 02 §7): it fires on reconnect, on the browser events of doc 02 §6,
+and on navigation to `/game/[roomCode]` (the resume-on-navigation
+decision, doc 02 §7). Screens never call it; there is no ninth action.
 
 Reconciliation flag (agreed direction, confirm on Day 1): an earlier
 draft proposed `useConnectionStatus / useRoom / useGameSnapshot /
@@ -120,10 +138,14 @@ must update both screen READMEs in the same change.
 
 Signatures F1's README pins (§6): `createRoom(nickname)` resolves
 `{ roomCode, yourColor }`; `joinRoom(roomCode, nickname)` resolves
-`{ roomCode, yourColor }`; both expose loading + error states. Resume is
-service-internal (automatic on reconnect/foreground, doc 02 §7) —
-screens never call it. F4's README pins `leaveRoom` ("navigate out
-cleanly … call F3's `leaveRoom`").
+`{ roomCode, yourColor }`; both expose loading + error states. F4's
+README pins `leaveRoom` ("navigate out cleanly … call F3's
+`leaveRoom`"). `submitMove` uses the pending pattern (§4), not a
+promise.
+
+The hooks are used from **client components only** — the lobby and game
+screens are `"use client"` (RULES.md §2); a server component must never
+import them.
 
 ## 6. Actions — 1:1 with `ClientCommand`
 
@@ -154,7 +176,9 @@ One action = one command variant = one promise/error state, nothing
 more. Each action: guard on connection status → set loading → build the
 command → `websocketService.send(command)` → resolve on the matching
 reply event (`room.created`/`room.joined`), reject on `server.error`.
-`submitMove` uses the pending pattern (§4), not a promise.
+`submitMove` uses the pending pattern (§4), not a promise. Draw offers
+need no dedicated action state: `offerDraw`/`acceptDraw` send the
+command, and the UI reads `snapshot.draw_offer` from `useGameState()`.
 
 ## 7. Wire-up sketch
 

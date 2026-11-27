@@ -1,41 +1,41 @@
 # 01 — Board architecture (HOW to build the board)
 
-You build: the grid, the FEN adapter, orientation, square colors, sizing.
-Style with uniwind `className` only (RULES.md §1.1); colors from `global.css`
-tokens only (RULES.md §1.3). TypeScript is `strict` — no `any` in exported
-APIs.
+You build: the grid, the FEN adapter, orientation, square colors, sizing, the
+keyboard/focus model. Style with Tailwind `className` only (RULES.md §1.1);
+colors from `global.css` tokens only (RULES.md §1.2). TypeScript is `strict`
+— no `any` in the module's public APIs. The board is a DOM **client component**: put
+`"use client"` at the top of every component file in this module (the pure
+`.ts` modules need no directive).
 
-## 1. Component tree — recommended: Board → 8 rows → 8 Squares
+## 1. Component tree — a CSS grid of 64 square elements
 
-Two viable shapes:
-
-- **(A) 8 row `View`s, each with 8 `Square`s (RECOMMENDED)**
-- (B) one flat 64-`Square` list in a wrapping container
-
-Choose **(A)**. Reasons:
-
-- **Guaranteed equal squares with zero measurement.** The board fixes its
-  outer size (`aspect-square w-full`, §5); each row is `flex-1` of the board
-  height; each square is `flex-1` of the row width. 8 rows × 8 equal columns
-  follow from flex alone — no `onLayout`, no math, no rounding drift.
-- Flat `flex-wrap` (B) depends on wrap math and minimum touch-size
-  interactions; it can produce off-by-one-subpixel rows and unequal children
-  once borders/overlays enter. It buys nothing here.
-- (B)'s only advantage is virtualization for huge lists — irrelevant at 64
-  children (§6).
+One container with `display:grid` and 64 square children — **no row wrappers
+needed**; the grid makes equal cells:
 
 ```
-ChessBoard                       // aspect-square w-full — owns interaction state
-├── <View> × 8                   // one per rank, className="flex-1 flex-row"
-│   └── <Square /> × 8           // flex-1, keyed by square name "a1".."h8"
-│        ├── square bg            // bg-board-light / bg-board-dark
-│        ├── highlight overlays   // last-move / move-target / check / selected
-│        └── <Piece />           // 02 §1 — your asset strategy, one file
-└── <PromotionChooser />         // modal — only when a promotion is pending
+ChessBoard ("use client")        // <div role="group" aria-label="Chess board">
+                                 //   className="grid aspect-square w-full grid-cols-8 grid-rows-8"
+├── <Square /> × 64              // a <button> — focusable (roving tabindex, §6),
+│   │                            //   keyed by square name "a1".."h8"
+│   ├── square bg                //   bg-board-light / bg-board-dark
+│   ├── highlight overlays       //   last-move / move-target / check / selected
+│   └── <Piece />                // 02 §1 — your asset strategy, one file
+└── <PromotionChooser />         // small dialog overlay — only while a promotion is pending
 ```
 
-`Square` is the only touchable thing (`Pressable`); `Piece` is inert
-rendering (until the optional drag stretch goal, 02 §6).
+Why a CSS grid (and not 8 flex-row wrappers, and not one wrapping flex list):
+
+- **Guaranteed equal squares with zero measurement.** `grid-cols-8
+  grid-rows-8` inside an `aspect-square w-full` container yields 64
+  exactly-equal cells — no math, no rounding drift, no layout code.
+- Eight flex-row wrappers would also work, but buy nothing in the DOM: the
+  grid handles equal sizing natively, and fewer wrappers mean simpler
+  keyboard traversal (§6).
+- A flex-wrap list depends on wrap math and can produce off-by-one rows once
+  borders/overlays enter. It buys nothing at 64 cells (§7).
+
+`Square` is the only interactive element (a `<button>`); `Piece` is inert
+rendering (until the optional drag enhancement, 02 §6).
 
 Suggested file layout (yours to adjust — keep names stable once frozen):
 
@@ -46,13 +46,21 @@ src/components/chess/
 ├── 02-pieces-and-interaction.md
 ├── 03-manual-testing.md
 ├── 04-acceptance.md
-├── chess-board.tsx          // the grid + interaction state machine (02 §2)
-├── square.tsx              // one memoized Pressable square + overlays
-├── piece.tsx               // one piece — the ONLY file that knows the asset
-├── fen.ts                  // PURE: fenToPieces(fen) + Square/Piece types
-├── orientation.ts          // PURE: display order for white/black-at-bottom
-└── promotion-chooser.tsx   // Queen/Rook/Bishop/Knight modal
+├── chess-board.tsx          // "use client" — grid + interaction state machine (02 §2)
+├── square.tsx               // "use client" — one memoized square button + overlays
+├── piece.tsx                // "use client" — one piece; the ONLY file that knows the asset
+├── promotion-chooser.tsx    // "use client" — Queen/Rook/Bishop/Knight dialog overlay
+├── fen.ts                   // PURE: fenToPieces + checkedKingSquare + types
+├── fen.test.ts              // vitest sibling (node env — pure logic, no DOM)
+├── orientation.ts           // PURE: display order for white/black-at-bottom
+├── orientation.test.ts      // vitest sibling
+├── move-targets.ts          // PURE: legal_moves → target set / promotion flag (02 §2)
+└── move-targets.test.ts     // vitest sibling
 ```
+
+The `.test.ts` siblings are part of the module's quality gates (RULES.md
+§5): vitest runs in a **node environment**, so those suites call functions
+only and never render anything (03 §2).
 
 ## 2. The FEN adapter — pure `fenToPieces(fen: string)`
 
@@ -72,8 +80,8 @@ rules; that's why it is allowed. YOU write the code.)
 1. `const placement = fen.split(" ")[0];` — the piece-placement field, e.g.
    `"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR"`.
 2. `const ranks = placement.split("/");` — must yield **exactly 8 strings**.
-   FEN lists **rank 8 first**: `ranks[0]` is rank 8 (top from White's view),
-   `ranks[7]` is rank 1.
+   FEN lists **rank 8 first**: `ranks[0]` is rank 8 (top from White's
+   perspective), `ranks[7]` is rank 1.
 3. For rank index `i` (0-based into `ranks`), the rank **number** is
    `8 - i` (so `i = 0` → rank `8`, `i = 7` → rank `1`).
 4. Walk each rank string left→right while tracking a 0-based **file index**
@@ -104,6 +112,7 @@ a rules engine.
 ```ts
 // src/components/chess/fen.ts
 // PURE module: no React, no state, no side effects.
+// Unit tests: fen.test.ts (03 §2) — node environment, no DOM.
 
 export type PieceType = "p" | "n" | "b" | "r" | "q" | "k";
 export type PieceColor = "white" | "black";
@@ -120,7 +129,7 @@ const PIECE_TYPES = "pnbrqk" as const;
 /**
  * Parse the piece-placement field of a FEN into occupied squares only.
  * Pure rendering math — NEVER validates move legality (RULES.md §4).
- * Algorithm: README doc 01 §2 (steps 1–6). TODO: implement.
+ * Algorithm: this doc §2 (steps 1–6). TODO: implement.
  */
 export function fenToPieces(fen: string): Map<Square, Piece> {
   // TODO 1: placement = fen.split(" ")[0]
@@ -134,6 +143,20 @@ export function fenToPieces(fen: string): Map<Square, Piece> {
   // TODO 6: return the Map
   return new Map(); // placeholder — replace
 }
+
+/**
+ * Square of the given side's king, or null when absent.
+ * Pure position reading — used ONLY to place the `bg-check` highlight
+ * when the server already said game_status === "check" (02 §3).
+ * It never decides whether it IS check. TODO: implement.
+ */
+export function checkedKingSquare(
+  pieces: Map<Square, Piece>,
+  color: PieceColor,
+): Square | null {
+  // TODO: scan the map for { type: "k", color } and return its square
+  return null; // placeholder — replace
+}
 ```
 
 Memoize at the call site so a re-render with the same position is free:
@@ -146,9 +169,9 @@ const pieces = useMemo(() => fenToPieces(snapshot.fen), [snapshot.fen]);
 
 The **local player's color** arrives via the `orientation` prop — F4 gets it
 from F3's session state (the `color` from `session.ready`, surfaced as
-`useRoomState().yourColor` per F3's `src/services/03-stores-and-hooks.md` §5). The board
-does NOT derive it: `snapshot.players` says who plays which color, but only
-F3's session knows which of them is holding this device.
+`useRoomState().yourColor` per F3's `src/services/03-stores-and-hooks.md`
+§5). The board does NOT derive it: `snapshot.players` says who plays which
+color, but only F3's session knows which of them is holding this device.
 
 Display order (pure helpers in `orientation.ts`):
 
@@ -163,6 +186,7 @@ moves).
 
 ```ts
 // src/components/chess/orientation.ts — PURE.
+// Unit tests: orientation.test.ts (03 §2).
 export type Orientation = "white" | "black"; // or import PlayerColor from "@/types/protocol"
 
 /**
@@ -176,13 +200,14 @@ export function squareAt(r: number, c: number, orientation: Orientation): Square
 }
 ```
 
-Key invariants (your manual tests in `03-manual-testing.md` check them):
+Key invariants (your tests and manual checks in `03-manual-testing.md` pin
+them):
 
 - Every `Square` is keyed by its **square name**, never by row/column index —
   when the board flips, the same 64 keys land in different positions and
-  taps keep reporting the correct square.
+  clicks keep reporting the correct square.
 - Square **colors** are computed from the square name (§4), so flipping the
-  view never flips light/dark squares.
+  board never flips light/dark squares.
 - Highlights are looked up by square name too (`last_move.from`,
   legal-move destinations), so orientation code and highlight code never
   interact.
@@ -203,55 +228,87 @@ Tokens only, from `frontend/global.css`: `board-light`, `board-dark`,
 `move-target`, `last-move`, `check` (utilities `bg-board-light`,
 `bg-board-dark`, `bg-move-target`, `bg-last-move`, `bg-check`). Dark-mode
 values for every token are defined in `global.css` too and switch
-automatically — you do zero extra work, and you never write a color literal
-or `bg-[#…]` (ESLint bans it).
+automatically with the system theme (`prefers-color-scheme` — zero
+per-component work). You never write a color literal or `bg-[#…]` (ESLint
+bans it).
 
 ## 5. Sizing — square squares that scale
 
 ```tsx
 // chess-board.tsx
-<View className="aspect-square w-full">     {/* width from parent, height = width */}
-  {/* 8 ×  <View className="flex-1 flex-row">  containing 8 × <Square className="flex-1" /> */}
-</View>
+<div className="grid aspect-square w-full grid-cols-8 grid-rows-8">
+  {/* 64 × <Square /> — each cell is exactly 1/8 of the board on BOTH axes */}
+</div>
 ```
 
 - The board takes **full width** from F4's game screen (F4's README: "board
   scales to width — give it a width") and `aspect-square` derives a square
   height. Never a fixed pixel size, never a stretched rectangle.
-- Rows and squares share the space with `flex-1` (§1) — no per-square size
-  math anywhere.
-- Safe areas are NOT the board's concern: the game screen wraps content in
-  `StyledSafeAreaView` / insets. The board itself must not add padding hacks.
-- Small-phone sanity is part of your checklist (`03-manual-testing.md` §I):
-  at ~375 dp width the full board fits with no clipping.
+- The grid does the rest: 8 equal columns × 8 equal rows inside that square.
+  No per-square size math anywhere.
+- Page-level layout (page padding, max-widths, page scrolling) is F4's
+  concern — the board itself adds none. It must not clip at phone widths
+  (~375 px — checklist 03 §I).
+- Keep overlays inside their square (absolute `inset-0` layers, 02 §3) so
+  nothing spills onto neighboring squares.
 
-## 6. Rendering performance — plain Views, memo, stable keys
+## 6. Keyboard + focus model (REQUIRED — RULES.md §2)
 
-- **No FlatList.** FlatList is for long/unknown-length scrolling lists. A
-  fixed 64-cell grid is ~64 small views — virtualization adds overhead,
-  breaks the flex grid from §1, and buys nothing. Use plain `View`/`Pressable`.
+The board must be fully playable from the keyboard. This module's decision:
+**64 square `<button>`s under a roving tabindex** (not 64 tab stops — one):
+
+- **Roving tabindex.** Exactly ONE square has `tabIndex={0}`; the other 63
+  have `tabIndex={-1}`. Tab into the board lands on that square; Tab again
+  leaves the board. Keep the roving stop in state (where focus last was);
+  initialize it to the top-left displayed square.
+- **Arrow keys move focus by displayed position** (left arrow = one cell
+  visually left in the CURRENT orientation). Clamp at edges — no wrapping.
+  Call `e.preventDefault()` on the handled arrows so the page does not
+  scroll while the board has focus.
+- **Enter / Space** activate the focused square button — the browser does
+  this natively for `<button>`; route it through the SAME handler as a
+  click (one code path, 02 §2).
+- **Escape** cancels the current selection (02 §2) — a keydown handler on
+  the board while a selection is active.
+- **Visible focus in both themes** (RULES.md §2): e.g.
+  `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`
+  on each square. Check it in dark mode too (03 §J).
+- Each square button carries an `aria-label`: square name + occupant, e.g.
+  `"e4, white pawn"`, `"e5"`. (Appending `, legal move target` while a
+  selection is active is welcome polish, not required.) The board container
+  is the `<div role="group" aria-label="Chess board">` from §1.
+
+Do NOT use the HTML `disabled` attribute to make squares inert — it removes
+them from keyboard focus. Keep them focusable, ignore activation, set
+`aria-disabled="true"` (02 §5).
+
+## 7. Rendering performance — memo, stable keys, nothing exotic
+
+- 64 small DOM nodes is nothing for a browser: no virtualization, no
+  windowing, no measurement code. Plain elements.
 - **`React.memo` on `Square`.** Squares re-render only when their own
   primitive props change. For that, pass **primitives** down (square name,
   piece type + color or `null`, booleans like `isTarget` / `isLastMove` /
-  `isCheck` / `isSelected`) — never a freshly created object/array per
-  render, or memo never helps.
+  `isCheck` / `isSelected` / `isFocusStop`) — never a freshly created
+  object/array per render, or memo never helps.
 - **Stable keys:** `key={squareName}` (`"a1"…"h8"`), never the array index —
   an index key would survive an orientation flip while its square changed
   meaning, which React resolves by mislabeling state.
 - Memoize the FEN parse on `snapshot.fen` (§2) and derive per-square props in
-  one `useMemo` per concern (e.g. a `Set` of target squares — see 02 §2).
-- Keep `Piece` dumb and memoized too; the expensive thing in this module is
-  nothing at 60fps — snapshots arrive one move at a time (seconds apart), so
-  this budget is generous. Do not add `windowing`, `VirtualizedList`,
-  `shouldComponentUpdate` class hacks, or manual measure code.
+  one `useMemo` per concern (e.g. a `Set` of target squares — 02 §2).
+- Snapshots arrive one move at a time (seconds apart) — this budget is
+  generous. Do not add measurement hacks or manual DOM diffing.
 
-## 7. What good looks like at the end of this stage
+## 8. What good looks like at the end of this stage
 
-- `fen.ts` and `orientation.ts` are pure modules with no React imports.
+- `fen.ts`, `orientation.ts` (+ `move-targets.ts` from 02) are pure modules
+  with no React imports, each with a passing vitest sibling.
 - Feeding `"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"`
   renders 32 pieces in the right places (harness: `03-manual-testing.md`).
-- Flipping `orientation` rotates the board; taps still report correct
-  square names (log them).
-- `npm run typecheck` and `npm run lint` are clean.
+- Flipping `orientation` rotates the board; clicks and keyboard activation
+  still report correct square names (log them).
+- Keyboard: Tab reaches exactly one square, arrows move focus, Enter/Space
+  activates, Escape cancels (03 §J).
+- `npm run typecheck`, `npm run lint` and `npm run test` are clean.
 
-Next: `02-pieces-and-interaction.md` — pieces and the tap-to-move machine.
+Next: `02-pieces-and-interaction.md` — pieces and the click-to-move machine.

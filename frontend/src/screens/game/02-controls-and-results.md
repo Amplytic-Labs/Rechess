@@ -4,6 +4,13 @@ All controls go through F3's actions (`useRoomActions()`). F3 owns
 `expected_revision` and duplicate-submission guards (`pending`) — you own the
 button states, confirmations and result presentation.
 
+Every control you render is a shared UI primitive from F1's
+`src/components/common/` (RULES.md §1.3) — the app has **no component
+library** by design, so never hand-roll a button/dialog/toast copy here.
+Exact import names, paths and props are defined by F1's doc set; if a
+variant you need is missing, that's a short PR to F1, not a private
+duplicate.
+
 ## 1. Offer / accept draw
 
 Wire state comes from the snapshot: `draw_offer: PlayerColor | null` — the
@@ -31,21 +38,23 @@ duplicate submissions.
 
 ## 2. Resign — confirmation dialog, destructive styling
 
-Resign is irreversible; it must require confirmation (your brief §6). Use a
-HeroUI **Dialog** — granular import (the root `heroui-native` import is
-banned by ESLint):
+Resign is irreversible; it must require confirmation (your brief §6). Use
+the shared **Dialog** and **Button** primitives from F1's
+`src/components/common/` — a hand-rolled copy here would fork focus
+management, keyboard operability and styling across the app (RULES.md §1.3,
+§2 accessibility):
 
 ```tsx
-// granular import — check the exact named exports in
-// node_modules/heroui-native/lib/typescript/src/components/dialog/
-import { Dialog } from "heroui-native/dialog";
-import { Button } from "heroui-native/button";
+// F1's shared primitives — exact names/paths/props come from F1's doc set
+// (src/components/common/); verify them there before wiring, and PR to F1
+// if a variant is missing.
+import { Button } from "@/components/common/button";
+import { Dialog } from "@/components/common/dialog";
 ```
 
 ```tsx
-{/* SKELETON — F4: implement (exact Dialog subcomponents: verify in the
-    installed package before wiring, see the import note above) */}
-<Button variant="flat" className="bg-surface border-destructive text-destructive">
+{/* SKELETON — F4: implement (exact subcomponents/props per F1's docs) */}
+<Button variant="outline" className="border-destructive text-destructive">
   Resign
 </Button>
 <Dialog>
@@ -57,14 +66,9 @@ import { Button } from "heroui-native/button";
 Styling rules:
 
 - The confirm action uses the `destructive` token: `bg-destructive` with
-  `text-primary-foreground`, or an outline variant
+  `text-destructive-foreground`, or an outline variant
   (`border-destructive text-destructive`) for the trigger.
-  ⚠️ **Flagged gap:** there is no `destructive-foreground` token — a solid
-  `bg-destructive` button needs a readable text color. Workaround: use
-  `text-primary-foreground` on solid destructive, or the outline variant. If
-  the team wants a proper `destructive-foreground`, that's a PR to
-  `global.css` (shared, F1 curates) — raise it, don't add it yourself.
-- Confirm calls `resign()` once; dialog state is local UI state. While
+- Confirm calls `resign()` once; dialog open/closed is local UI state. While
   `pending`, the trigger is disabled.
 - On success both clients get `game.finished` /
   `game.state` with `result: { winner: <opponent color>, reason:
@@ -93,15 +97,16 @@ UX you build:
 > ⚠️ **Flagged protocol gap (raise with F3/B3):** `GameSnapshot` carries no
 > rematch-vote field, so the opponent's vote is invisible until both voted
 > and the fresh snapshot lands. If the team wants "opponent wants a
-> rematch" shown to the non-voting player, F3 needs it exposed in room
+> rematch" shown to the non-voting player, F3 needs to surface it in room
 > state (or the protocol needs a `rematch_offers` field). Until then:
 > "Waiting for opponent…" keyed to your own vote is the best possible UX.
 
 ## 4. Result view — winner + reason mapping
 
 When `snapshot.result !== null` (and/or a `game.finished` event landed in
-F3's store), replace the turn indicator with the result view (modal or
-inline panel — `game-result-modal.tsx`):
+F3's store), replace the turn indicator with the result view (an overlay
+dialog via F1's Dialog primitive, or an inline panel —
+`game-result-modal.tsx`):
 
 - Headline from `result.winner`: `null` → "Draw"; your color → "You win";
   opponent's color → "You lose" (or "<nickname> wins" — pick one, keep it
@@ -156,9 +161,12 @@ Implementation notes:
 
 - Put this in a PURE `error-messages.ts` (`Record<ErrorCode, string>` —
   exhaustive at typecheck; never a fallback that leaks `message` or JSON).
-- Display via a short-lived inline toast/banner (e.g. HeroUI
-  `heroui-native/toast` or your own themed banner) — auto-dismiss, themed
-  with tokens. The wire `message` is safe for display, but prefer your
-  mapped text for tone consistency.
+- Display via a short-lived themed toast/banner — F1's toast primitive from
+  `src/components/common/` (auto-dismiss, token-styled). If F1 has not
+  landed one yet, coordinate: a temporary inline banner in this folder is
+  acceptable while developing, but it moves to `src/components/common/` via
+  F1 as soon as the app needs it anywhere else — never keep a private
+  copy. The wire `message` is safe for display, but prefer your mapped text
+  for tone consistency.
 - For move rejections specifically, the board must **not** be patched by
   you — the fresh snapshot F3 applied is the truth (doc 03 §2).

@@ -103,7 +103,7 @@ frontend/
 
 - `target/` — never ship the (multi-GB) local build dir into the context;
   `COPY backend/ .` would copy it otherwise and bust the cache.
-- `frontend/` — the backend image does not need the Expo app; the context
+- `frontend/` — the backend image does not need the Next.js app; the context
   stays small and the image cannot accidentally depend on frontend files.
 - `.git/` — no history, no VCS metadata in the image.
 
@@ -148,7 +148,7 @@ curl -i https://<host>/health
 ## 6. WSS termination (TLS at the reverse proxy)
 
 The backend serves plain HTTP/WS on `PORT`. **TLS is terminated in front** —
-never expose the container directly to the internet; browsers/app stores need
+never expose the container directly to the internet; browsers need
 `wss://` in production. The WebSocket endpoint is mounted by B3 at `/ws`
 (per `src/network/README.md`), so the proxy must forward `/ws` with upgrade
 headers and **timeouts longer than the server's heartbeat interval**.
@@ -267,13 +267,14 @@ rollback, do not pretend state survived.
   `.with_graceful_shutdown(...)` on the `axum::serve` call in `main.rs`
   before the first production deploy.
 
-**Client connection (how a phone points at the backend)**
+**Client connection (how a browser points at the backend)**
 
-- Local: set `EXPO_PUBLIC_API_URL=ws://<LAN-IP>:3000/ws` in the frontend env
-  (`frontend/.env`) and load the app in Expo Go via the QR code — phone and
-  backend must be on the same LAN.
-- Production: `EXPO_PUBLIC_API_URL=wss://<host>/ws`, TLS terminated in front
-  (§6) — never point a production client at plain `ws://`.
+- Local: run the backend first, then `cd frontend && npm run dev` and open
+  http://localhost:3001 in the browser. The default `NEXT_PUBLIC_API_URL`
+  (`ws://localhost:3000/ws`) already targets the local backend — override it
+  in `frontend/.env.local` only if your setup differs.
+- Production: `NEXT_PUBLIC_API_URL=wss://<host>/ws` behind TLS, terminated
+  in front (§6) — never point a production client at plain `ws://`.
 - The client side (connect, resume, heartbeat) is F3's:
   `frontend/src/services/02-websocket-service.md`.
 

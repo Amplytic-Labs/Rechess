@@ -2,7 +2,7 @@
 
 Authoritative multiplayer chess backend. **Rust · axum 0.8 · tokio · shakmaty**
 
-> The server is the only authority on game state. The mobile client renders;
+> The server is the only authority on game state. The web client renders;
 > it never decides move legality.
 
 ## Status

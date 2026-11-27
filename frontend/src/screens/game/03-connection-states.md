@@ -14,22 +14,23 @@ What you build:
 
 - `onMoveSubmit` → immediately hand off to `submitMove(...)` and render a **pending
   indicator** keyed to `pending` from `useGameState()` (F3 sets it on send and
-  clears it on the next `game.state` / rejection): a small spinner next to
-  your player bar and/or "Sending move…" in the turn indicator (HeroUI
-  `heroui-native/spinner` is a verified subpath — check its named exports in
-  the installed package, granular import only).
+  clears it on the next `game.state` / rejection): a small inline spinner
+  next to your player bar and/or "Sending move…" in the turn indicator. A
+  spinner needs no library — Tailwind's `animate-spin` on a small themed
+  element (e.g. `rounded-full border-2 border-border border-t-primary`) is
+  enough; if F1's doc set ships a loading primitive, prefer it.
 - While `pending`: `disabled` for the board is true (a second tap must not
   submit twice — F3 also guards, but the UI must not invite it).
 - The board's FEN does not change until the next snapshot arrives — that IS
   the correct behavior; do not "help" it.
 
-Sequence you will see (two devices, revision N):
+Sequence you will see (two browsers, revision N):
 
 1. You tap → F3 sends `game.move` with `expected_revision: N`.
 2. Screen: `pending === true`, board disabled.
 3. Server accepts → broadcasts `game.state` (revision **N+1**) → F3 applies
    the snapshot atomically → board updates, `pending === false`, history row
-   appears. Both devices converge on the same revision.
+   appears. Both clients converge on the same revision.
 
 ## 2. Move rejected — `game.move_rejected`
 
@@ -84,7 +85,7 @@ Your own connection is F3's domain: backoff reconnect with
 `session.ready` (protocol §7). **The screen just renders state** — it never
 triggers reconnects:
 
-- `useConnection()` (F3's README §6 store states): `"connecting"` |
+- `useConnection()` (F3's doc 03 §5 — connection store): `"connecting"` |
   `"connected"` | `"reconnecting"` | `"disconnected"`.
 - `"connecting"`/`"reconnecting"` → a "Reconnecting…" banner (e.g.
   `bg-surface-muted`, `border-border`, spinner + text). Keep it calm and
@@ -93,14 +94,25 @@ triggers reconnects:
   queue moves while disconnected — F3 buffers/rejects sends; the UI must not
   imply moves will land).
 - `"disconnected"` after retries gave up → the persistent banner plus a
-  retry affordance only if F3 exposes one — otherwise the banner plus your
-  leave action. **Do not** call `wsService` from the screen; if resume
-  behavior needs surfacing, ask F3 to expose it in the hook (flagged in
-  doc 05).
+  retry affordance only if F3 provides one — otherwise the banner plus your
+  leave action. **Do not** touch the WebSocket service from the screen; if
+  resume behavior needs surfacing, ask F3 to surface it in the hook (flagged
+  in doc 05).
+- **Page reload is a reconnect case, not a new session.** Reloading
+  `/game/[roomCode]` remounts the app; F3's service resumes from its token
+  storage and the store refills from `session.ready` + `game.state`. Your
+  only job: while `snapshot === null`, render the themed loading state
+  (never a crash), then the store-driven screen. Same for opening the room
+  URL fresh in a new tab — it resumes the seat stored for that browser
+  context.
+- **No client-side fallback data.** Never paper over a gap with an API
+  route, server action or `fetch` — there is nothing to fetch from; the
+  Rust WS server is the only data source (RULES.md §2). A disconnected
+  screen shows the last authoritative snapshot plus the banner, read-only.
 - **Distinct from game-over:** connection state and game state are separate
-  stores (F3's README §6: "disconnected ≠ finished"). The result view renders
-  from `result`; the banner renders from `connection` — they must never be
-  derived from each other.
+  stores (F3's doc 03 §1: "disconnected ≠ finished"). The result view
+  renders from `result`; the banner renders from `connection` — they must
+  never be derived from each other.
 
 ## 5. Not-your-turn / disabled states
 
@@ -109,9 +121,9 @@ triggers reconnects:
 - While `turn !== yourColor` and the game is live: board `disabled`, turn
   indicator shows "Waiting for opponent…". The server still enforces turn —
   this is UX, not authorization (your brief §6).
-- Disabled must be **visible but not jarring**: F2's contract takes a
-  boolean `disabled`; combine all sources in ONE expression in the screen:
-  `pending || turn !== yourColor || connection !== "connected" || result !== null`.
+- Disabled must be **visible but not jarring**: F2's contract takes a boolean
+  `disabled`; combine all sources in ONE expression in the screen:
+  `pending || turn !== yourColor || connectionStatus !== "connected" || result !== null`.
 - Buttons follow the same discipline: draw/resign disabled while `pending`;
   rematch only when finished (doc 02 §3); leave always available (but confirm
   if the game is live — leaving an active game is destructive-adjacent).

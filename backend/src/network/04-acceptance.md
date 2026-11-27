@@ -125,15 +125,16 @@ Everything F3's client may rely on, in one place — mirror this in
 
 - One endpoint: `ws://<host>/ws` in dev, `wss://<host>/ws` in production.
   One message = one single-frame JSON **text** frame, UTF-8. Keep
-  `player_token` ONLY in secure storage; reconnect with capped exponential
-  backoff + jitter (0.5 s → 30 s) and `session.resume`.
+  `player_token` ONLY in client-side storage (F3's security doc); reconnect
+  with capped exponential backoff + jitter (0.5 s → 30 s) and
+  `session.resume`.
 - The server closes the socket: on `UNSUPPORTED_VERSION` (after the error),
   after ~90 s of silence (heartbeat, below), when the room ends, after an
   accepted `room.leave` (D3 — treat that close as SUCCESS, not a reconnect
   trigger), or when the client is too slow (bounded queue) — in every case
   the recovery is the same: `session.resume` returns the full snapshot.
 - Heartbeat: the server sends a WebSocket protocol Ping every 30 s; browser
-  and Expo WebSocket stacks answer automatically — the client app does
+  WebSocket stacks answer automatically — the client app does
   nothing, no app-level heartbeat event exists in v1. Two unanswered pings
   (~60 s silence) ⇒ server closes.
 - Limits enforced server-side: 64 KiB message/frame size (larger frames are

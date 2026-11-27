@@ -1,7 +1,7 @@
 # Rechess
 
 Real-time 1v1 multiplayer chess — **Rust (axum/tokio) authoritative backend ·
-Expo (React Native) mobile client · WebSocket protocol v1**.
+Next.js 16 (React 19) web client · WebSocket protocol v1**.
 
 No accounts, no sign-up: create a room, share the code, play, reconnect,
 rematch. The server is the only authority on game state.
@@ -22,13 +22,13 @@ Rechess/
 │   ├── src/network/         B3 — axum WebSocket transport (+ src/protocol/, wire types)
 │   ├── tests/               B4 — integration tests, CI, Docker, deployment
 │   └── src/main.rs          minimal skeleton: health endpoint (runs today)
-├── frontend/                Expo SDK 58 mobile app (TypeScript, Expo Router)
+├── frontend/                Next.js 16 web app (TypeScript, App Router)
 │   ├── src/screens/lobby/   F1 — app foundation, home, create/join, waiting room
 │   ├── src/components/chess/ F2 — chessboard, pieces, highlights, promotion
-│   ├── src/services/        F3 — WebSocket client, stores, types, secure storage
+│   ├── src/services/        F3 — WebSocket client, stores, types, token storage
 │   ├── src/screens/game/    F4 — game screen, panels, history, results
 │   ├── RULES.md             ⚠️ every frontend contributor reads this first
-│   └── src/app/             Expo Router routes (thin wrappers over screens)
+│   └── src/app/             App Router routes (thin wrappers over src/screens/**)
 ├── docs/
 │   ├── architecture.md      system overview & key decisions
 │   └── protocol-v1.md       WebSocket protocol spec (co-owned by B3 + F3)
@@ -47,12 +47,15 @@ steps, contracts and test plans.
 cd backend
 cargo run               # → http://localhost:3000/health
 
-# Frontend (Node ≥ 22)
+# Frontend (Node ≥ 22) — start the backend first
 cd frontend
 npm install             # already done in this base
-npm start               # Expo dev server — scan QR with Expo Go
+npm run dev             # Next.js dev server → http://localhost:3001
 
-# Point the app at your backend: see frontend/src/services/README.md
+# Point the app at your backend: NEXT_PUBLIC_API_URL (default
+# ws://localhost:3000/ws in dev, wss://… in production) — see
+# frontend/src/services/README.md
+# Frontend gates (CI runs all four): typecheck / lint / test / build
 ```
 
 ## Ground rules (whole team)
@@ -76,7 +79,7 @@ npm start               # Expo dev server — scan QR with Expo Go
 - Rust **1.100.0** (`backend/rust-toolchain.toml`), crates pinned in
   `backend/Cargo.toml` + `Cargo.lock` (axum 0.8.9, tokio 1.54.1, shakmaty
   0.30.3, …)
-- Expo **SDK 58** (React Native 0.88, React 19.3), NativeWind **4.2.7**
-  (Tailwind 3), Reanimated 4.7.1, zustand 5 — exact versions in
+- Frontend: Next.js **16.4.6** (App Router, React 19.3), TypeScript `strict`,
+  Tailwind CSS **4.3.3**, zustand 5, vitest — exact versions in
   `frontend/package.json` + `package-lock.json`
 - MVP scope, architecture and milestones: `docs/architecture.md`

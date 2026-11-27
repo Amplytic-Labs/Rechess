@@ -148,7 +148,7 @@ Per-connection token bucket (constants in `limits.rs`):
 |---|---|---|
 | Commands | 10/s, burst 20 | Chess pace is a few commands per *minute*; 10/s is ~100x headroom while still catching runaway retry loops. |
 | `room.create` / `room.join` / `session.resume` | 1 per 10 s per connection | Room-code guessing / room-hopping throttle (room codes are identifiers, not secrets). B2 re-guards too; the cheap B3 gate protects B2 first. |
-| `Origin` header | validate against an explicit allowlist (config via env) | Browser clients only. Native Expo clients may omit `Origin` — token auth + TLS remain required. MVP is native-only: the Origin check is deferred until a web client exists (recorded decision, brief §6). |
+| `Origin` header | **REQUIRED production control** — validate against an explicit allowlist (config via env, e.g. same-origin + explicit hosts); reject every other upgrade with the standard `403` **before** the upgrade completes | Browsers always send `Origin` on a WS upgrade, and the client is now the Next.js web app (browser tabs) — the check was deferred while the client was native-only, and is re-activated by the Next.js migration. Dev default: allow localhost origins. Token auth + TLS remain required alongside. |
 
 Violation → `server.error` `RATE_LIMITED`, connection stays (first offenses
 are recoverable); a client that keeps tripping the bucket after the error (5+

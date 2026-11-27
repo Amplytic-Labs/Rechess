@@ -356,8 +356,8 @@ create/join bumping is defined when `rooms::` lands; assert the *rule*
 ## 4. Manual end-to-end smoke test (the real stack)
 
 Run after every merge that touches `src/network/`, before release tags, and
-before every demo. Two physical devices or emulators, plus one raw WS client
-(websocat or Postman) for protocol-level checks.
+before every demo. Two browser tabs or windows (the two "devices"), plus one
+raw WS client (websocat or Postman) for protocol-level checks.
 
 **Setup**
 
@@ -371,9 +371,12 @@ cargo run                        # binds 0.0.0.0:3000 — log prints the address
 # marked [after B3 lands] 404s until the /ws route exists):
 curl -s http://localhost:3000/health     # expect {"service":"rechess-backend","status":"ok"}
 
-# Terminal 3 — the Expo client for the two devices:
-cd frontend && npx expo start            # scan the QR code from each device
-# (Device on same Wi-Fi uses the server's LAN IP: ws://<lan-ip>:3000/ws)
+# Terminal 3 — the web client for the two "devices" (each a browser tab):
+cd frontend && npm run dev               # → http://localhost:3001 — open it in
+                                         # two tabs (or two browsers / one
+                                         # normal + one incognito window)
+# (default NEXT_PUBLIC_API_URL=ws://localhost:3000/ws already targets the
+#  local backend — see frontend/RULES.md §5)
 ```
 
 **Raw-protocol checks** (websocat; Postman: New → WebSocket Request → same URL):
